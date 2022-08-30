@@ -15,6 +15,6 @@ https://drive.google.com/drive/folders/1CgBwNie4_myV0v8z8--3khZMDddstaDo?usp=sha
 Copy the wav (common_voice_cs_25695144_16.wav) next to the exe binary too.
 
 
-#Run
+# Run
 ./onnxinfere
  
