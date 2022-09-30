@@ -16,7 +16,10 @@ set(ONNX_LIB_DIR . )
 # Gradle automatically packages shared libraries with your APK.
 
 add_compile_options(
-  -DDEBUG
+#  -DDEBUG_STFT
+  -DDEBUG_FEAT
+# -DDEBUG_WAV
+# -DDEBUG_INF
   -mfma
   -mavx2
   -fno-permissive
