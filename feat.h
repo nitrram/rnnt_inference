@@ -17,8 +17,8 @@ namespace spr::feat {
     E_STFT_MAG = -1,
     E_FILTER_BANK_MUL = -2,
     E_MULTFQ_MAG_SIZE = -3,
-    E_MULTFQ_OUT_SIZE = -4
-
+    E_MULTFQ_OUT_SIZE = -4,
+    E_AMP2DB = -5
   };
 
   inline const char* get_message_from_error_code(int code) {
@@ -76,7 +76,9 @@ namespace spr::feat {
     /** Multiplies input spectrum and filter bank matrix
      * Fbank matrix is global, imported from within a header
      */
-    int multfq(uint16_t spec_row_size, float *outmat) const;
+    int multfq(float *outmat) const;
+
+    int amp2db(float *outmat) const;
 
   private:
 

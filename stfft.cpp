@@ -187,10 +187,10 @@ namespace spr::stfft {
 
     if (ffth_param->mode == STAND) {
       uint32_t out_w = (fft_len + 2);
-      uint32_t size = win_inc * out_w - out_w;
+      uint32_t size = win_inc * out_w;
 
-      if( ((size - 1)) > ffth_param->out_size) {
-        std::cerr << "stfft error compute: out-buffer overflow: (size)" << ((size -1) * out_w) << " > (params)" << ffth_param->out_size << std::endl;;
+      if(size > ffth_param->out_size) {
+        std::cerr << "stfft error compute: out-buffer overflow: (size)" << size << " > (params)" << ffth_param->out_size << std::endl;;
         return E_COMPUTE_OUT_BUF_SIZE;
       }
 
@@ -215,7 +215,7 @@ namespace spr::stfft {
         out[idx] = fmadd(in + i * win_shift, kernel + j * fft_len, fft_len);
       }
 
-      if( ((size - 1) >> 1) > ffth_param->mag_size) {
+      if( (size >> 1) > ffth_param->mag_size) {
         std::cerr << "stfft error compute: mag-buffer overflow: (size)" << (size - 1) <<" * " <<
           (fft_len >> 1) << " > (params)" << ffth_param->mag_size << std::endl;
         return E_COMPUTE_MAG_BUF_SIZE;
