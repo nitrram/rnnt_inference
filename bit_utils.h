@@ -17,8 +17,8 @@
 using sample_aligned_t = int;
 using neon_q_sample_aligned_t = int32x4_t;
 
-#define SAMPLE_MAX (((unsigned)-1) >> 1)
-#define SAMPLE_MIN (1 << 31)
+#define SAMPLE_MAX (sample_aligned_t)(((unsigned)-1) >> 1)
+#define SAMPLE_MIN (sample_aligned_t)(1 << 31)
 
 #define SAMPLE_LOCALS sample_aligned_t macro_temp_sample LSX_UNUSED; \
   double macro_temp_double LSX_UNUSED

@@ -9,6 +9,9 @@
 #include "NEON_2_SSE.h"
 #endif
 
+#ifdef DEBUG
+#include <iostream>
+#endif
 
 inline float fmadd(const float *in1, const float *in2, uint32_t size) {
 
@@ -19,6 +22,9 @@ inline float fmadd(const float *in1, const float *in2, uint32_t size) {
     result_data[1] = 0;
     result_data[2] = 0;
     result_data[3] = 0;
+
+    //    std::cout << "fmadd: [" << *in1 << " + " << *in2 << "]\n";
+    
     for (uint32_t i = 0; i < cnt_block; ++i) {
         load_data1 = vld1q_f32(in1);
         load_data2 = vld1q_f32(in2);
@@ -60,29 +66,33 @@ inline void fpowadd2in(const float *re, const float *im, float *out, uint32_t si
     }
 }
 
-/*
-inline void mult_row(const float *mag, const float *fb, float * out_row, uint32_t row , uint32_t size) {
 
-    uint32_t cnt_block = size / NEONSIZE;
-    uint32_t cnt_rem = size - cnt_block * NEONSIZE;
-    float32x4_t result_data, load_data1, load_data2;
-    result_data[0] = 0;
-    result_data[1] = 0;
-    result_data[2] = 0;
-    result_data[3] = 0;
-    for (uint32_t i = 0; i < cnt_block; ++i) {
-        load_data1 = vld1q_f32(in1);
-        load_data2 = vld1q_f32(in2);
-        result_data = vfmaq_f32(result_data, load_data1, load_data2);
-        in1 += NEONSIZE;
-        in2 += NEONSIZE;
-    }
+inline void fdsub(float *in_out, const float *sub, const float *div, uint32_t size) {
 
-    float out = result_data[0] + result_data[1] + result_data[2] + result_data[3];
-    for (uint32_t i = 0; i < cnt_rem; ++i) {
-        out += in1[i] * in2[i];
-    }
-    return out;
+  uint32_t cnt_block = size / NEONSIZE;
+  uint32_t cnt_rem = size - cnt_block * NEONSIZE;
+
+  float32x4_t result_data, in_data, sub_data, div_data;
+  result_data[0] = 0;
+  result_data[1] = 0;
+  result_data[2] = 0;
+  result_data[3] = 0;
+
+  for (uint32_t i = 0; i < cnt_block; ++i) {
+    in_data = vld1q_f32(in_out);
+    sub_data = vld1q_f32(sub);
+    div_data = vld1q_f32(div);
+
+    result_data = vdivq_f32(vsubq_f32(in_data, sub_data), div_data);
+    vst1q_f32(in_out, result_data);
+    
+    in_out += NEONSIZE;
+    sub += NEONSIZE;
+    div += NEONSIZE;
+  }
+  
+  for(uint32_t i=0; i < cnt_rem; ++i) {
+    in_out[i] = (in_out[i] - sub[i]) / div[i];
+  }
 }
-*/
 //eof
