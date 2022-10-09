@@ -179,6 +179,25 @@ namespace routines {
   }
 }
 
+
+void softmax(float *io, uint32_t size) {
+
+  double sum = 0.0;
+#pragma omp parallel for num_threads(THREADSIZE)
+  for(uint32_t i=0; i < size; ++i) {
+    sum += std::exp((double)io[i]);
+  }
+
+  sum = std::log(sum);
+
+#pragma omp parallel for num_threads(THREADSIZE)
+  for(uint32_t i=0; i<size; ++i) {
+    io[i] -= sum;
+  }
+}
+
+/* THIS VERSION HAS TO BE OPT FOR F64
+ * SINCE SUM VALUE IS OFTEN UNDERFLOWN ON F32
 inline void softmax(float *io, uint32_t size) {
 
   using namespace routines;
@@ -198,6 +217,14 @@ inline void softmax(float *io, uint32_t size) {
   // compute sum of all
   for(uint32_t i = 0; i < cnt_block; ++i) {
     load_data = vld1q_f32(io);
+
+    if(i==0) {
+      std::cout << load_data[0] << ", ";
+      std::cout << load_data[1] << ", ";
+      std::cout << load_data[2] << ", ";
+      std::cout << load_data[3] << "\n";
+    } 
+    
     result_data = vaddq_f32(result_data, exp_ps(load_data));
     io += NEONSIZE;
   }
@@ -208,7 +235,9 @@ inline void softmax(float *io, uint32_t size) {
   }
 
   // denominator of the overall log
+  std::cout << "sum exp: " << sum << std::endl;
   sum = std::log(sum);
+  std::cout << "sum log: " << sum << std::endl;
 
   // reset to the begin of io
   io = begin_io;
@@ -225,3 +254,4 @@ inline void softmax(float *io, uint32_t size) {
     io[i] = io[i] - sum;
   }
 }
+*/

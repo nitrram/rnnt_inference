@@ -24,6 +24,7 @@
 #include "fbank_80_201.h"
 #include "normalize_vals.h"
 #include "softmax_neon.h"
+#include "tokenizer.h"
 #include "wavread.h"
 #include "feat.h"
 #include "fmadd_neon.h"
@@ -402,6 +403,8 @@ the_model_inference(Ort::Session *session_tn,
   float embedding[target_sizes_pn.at(0)];
   float pn_state_buffer[target_sizes_pn.at(1)];
   float pre_alloc_sum_gelu[target_size_cn];
+
+  std::cout << "hidden: " << &pn_state_buffer << std::endl;
   
   // init embedding
   for(size_t i=0; i<target_sizes_pn.at(0); embedding[i++]=0.0f);
@@ -418,30 +421,41 @@ the_model_inference(Ort::Session *session_tn,
     return left.logp_score / left.prediction.size() < right.logp_score / right.prediction.size(); };
 
   bool _tmp_rem = false;
+  int _tmp_debug_step = 18;
 
   //e.g. 89x [1,1,512]
   for(int step_t = 0; step_t < tn_shape[1]; ++step_t) {
 
     process_hyps = beam_hyps;
 
-    std::cout << "#1 [" << step_t << "] = process_hyps: " << process_hyps.size() << std::endl;
+    std::cout << "[" << step_t << "] = process_hyps: " << process_hyps.size() << " = " <<
+      (process_hyps.size() == 1 ? process_hyps.back().logp_score : a_best_it->logp_score) << std::endl;
     beam_hyps.clear(); //fixme <<
-    std::cout << "#2 [" << step_t << "] = process_hyps: " << process_hyps.size() << std::endl;
+
 
     while(1) {
-      if(beam_hyps.size() > BEAM_SIZE) break;
+      if(beam_hyps.size() >= BEAM_SIZE) {
+        std::cout << "beam size reached in step [" << step_t << "]\n";
+        break;
+      }
 
       a_best_it = std::max_element(process_hyps.cbegin(), process_hyps.cend(), best_fun);
+
+      if(a_best_it == process_hyps.cend()) break;
+      
       auto a_best_tok = *a_best_it; // destruction of this will cause SIGTERM
 
       if(beam_hyps.size() > 0) {
         b_best_it = std::max_element(beam_hyps.cbegin(), beam_hyps.cend(), best_fun);
         auto b_best_tok = *b_best_it;
+
         /*state_beam = 4.6*/
-        if(b_best_tok.logp_score >= STATE_BEAM + a_best_tok.logp_score) break;
+        if(b_best_tok.logp_score >= STATE_BEAM + a_best_tok.logp_score) {
+          break;
+        }
       }
 
-      std::cout << "a_best_tok: prediction: " << a_best_tok.prediction.back() << std::endl;
+      //      std::cout << "a_best_tok: prediction: " << a_best_tok.prediction.back() << std::endl;
 
       if(a_best_it != process_hyps.cend())
         process_hyps.erase(a_best_it);
@@ -466,17 +480,26 @@ the_model_inference(Ort::Session *session_tn,
                 output_node_names_pn);
 
 #ifdef DEBUG_INF
-      if(!_tmp_rem && step_t == 0) {
+      if(!_tmp_rem && step_t == _tmp_debug_step) {
         auto *enc_t =  output_tensors_tn.at(0).GetTensorData<float>() + (step_t * target_size_cn);
         std::cout << "enc: output: [\n";
         for(size_t i = 0; i < target_size_cn; ++i) {
           std::cout << enc_t[i] << ((target_size_cn - 1 > i) ? ", " : "\n]\n");
         }
 
-        auto *pn = output_tensors_pn.at(0).GetTensorData<float>();
+        // auto *pn = output_tensors_pn.at(0).GetTensorData<float>();
+        // std::cout << "pred: output: [\n";
+        // for(size_t i = 0; i < target_size_cn; ++i) {
+        //   std::cout << pn[i] << ((target_size_cn - 1 > i) ? ", " : "\n]\n");
+        // }
+      }
+
+      if(step_t == _tmp_debug_step) {
+        auto *pn = output_tensors_pn.at(1).GetTensorData<float>();
+        size_t pn_size = output_tensors_pn.at(1).GetTensorTypeAndShapeInfo().GetShape().at(2);
         std::cout << "pred: output: [\n";
-        for(size_t i = 0; i < target_size_cn; ++i) {
-          std::cout << pn[i] << ((target_size_cn - 1 > i) ? ", " : "\n]\n");
+        for(size_t i = 0; i < pn_size; ++i) {
+          std::cout << pn[i] << ((pn_size - 1 > i) ? ", " : "\n]\n");
         }
       }
 #endif
@@ -494,7 +517,7 @@ the_model_inference(Ort::Session *session_tn,
               output_node_names_cn);
 
 #ifdef DEBUG_INF
-      if(!_tmp_rem && step_t == 0) {
+      if(!_tmp_rem && step_t == _tmp_debug_step) {
         auto *jn =  output_tensors_cn.at(0).GetTensorData<float>();
         size_t jn_size = output_tensors_cn.at(0).GetTensorTypeAndShapeInfo().GetShape().at(2);
         std::cout << "joint: output: [\n";
@@ -508,7 +531,7 @@ the_model_inference(Ort::Session *session_tn,
       softmax(output_tensors_cn.at(0).GetTensorMutableData<float>(), output_tensors_cn.at(0).GetTensorTypeAndShapeInfo().GetShape().at(2));
 
 #ifdef DEBUG_INF
-      if(!_tmp_rem && step_t == 0) {
+      if(!_tmp_rem && step_t == _tmp_debug_step) {
         auto *jn =  output_tensors_cn.at(0).GetTensorData<float>();
         size_t jn_size = output_tensors_cn.at(0).GetTensorTypeAndShapeInfo().GetShape().at(2);
         std::cout << "joint softmax: output: [\n";
@@ -526,7 +549,8 @@ the_model_inference(Ort::Session *session_tn,
 
 
 #ifdef DEBUG_INF
-      if(step_t == 0) {
+      //      if(step_t == _tmp_debug_step) {
+      if(true) {
         std::cout << "top3: [" <<
         std::get<0>(top_log_probs.at(0)) << "|" << std::get<1>(top_log_probs.at(0)) << ", " <<
         std::get<0>(top_log_probs.at(1)) << "|" << std::get<1>(top_log_probs.at(1)) << ", " <<
@@ -541,8 +565,14 @@ the_model_inference(Ort::Session *session_tn,
 
 
 #ifdef DEBUG_INF
+      if(step_t == _tmp_debug_step) {
+        std::cout << "best_logp: " << best_logp << std::endl;
+      }
+
+      
       /*
       if(step_t == 0) {
+      
         std::vector<float> topk;
         std::vector<int> topp;
         for(const auto&t: top_log_probs) {
@@ -559,50 +589,86 @@ the_model_inference(Ort::Session *session_tn,
 
         token_t top_hyp = {
               .prediction = a_best_tok.prediction,
-              .logp_score = a_best_tok.logp_score * std::get<0>(top_log_probs.at(step_e))
+              .logp_score = a_best_tok.logp_score + std::get<0>(top_log_probs.at(step_e))
         };
+
+        //        std::cout << "topk score: " << top_hyp.logp_score << std::endl;
 
         //        std::cout << "[top_log | top_pos, best_logp, EXPAND_BEAM] = [" << (std::get<0>(top_log_probs.at(step_e))) << " | " << std::get<1>(top_log_probs.at(step_e)) << ", " << best_logp << ", " << EXPAND_BEAM << "]\n";
 
         // if the found top scored label is equal to blank, expand beam hypothesis
         if(std::get<1>(top_log_probs.at(step_e)) == 0) {
 
+          //TODO ///fixme I must copy the values for every hidden_state (cannot use just a set for every of them)
           if(a_best_tok.hidden_state && *a_best_tok.hidden_state != Ort::Value(nullptr))
             top_hyp.hidden_state = new Ort::Value((OrtValue*)a_best_tok.hidden_state);
 
           beam_hyps.emplace_back(std::move(top_hyp));
 
+#ifdef DEBUG_INF
+          if(step_t == _tmp_debug_step) {
+            std::cout << "\tbeam : [" << beam_hyps.size() << "]\n";
+          }
+#endif
           continue; //for( step_e )
         }
 
-        //TODO ----->
         if(std::get<0>(top_log_probs.at(step_e)) >= best_logp - EXPAND_BEAM) {
 
           top_hyp.prediction.emplace_back(std::get<1>(top_log_probs.at(step_e)));
 
+
+          //TODO ///fixme I must copy the values for every hidden_state (cannot use just a set for every of them)
           top_hyp.hidden_state = ((output_tensors_pn.at(1) != Ort::Value(nullptr)) ?
                                   new Ort::Value( (OrtValue*)output_tensors_pn.at(1) ) :
                                   new Ort::Value(nullptr));
 
-
           process_hyps.emplace_back(std::move(top_hyp));
+
+#ifdef DEBUG_INF
+          if(step_t == _tmp_debug_step) {
+            std::cout << "\tproc : [" << process_hyps.size() << "]\n";
+          }
+#endif
+
         }
       } //for(int step_e = 0; step_e < top_log_probs.size(); ++step_e)
        
-      // assert(output_tensors_cn.size() == 1);
-      // assert(output_tensors_cn.at(0).GetTensorTypeAndShapeInfo().GetShape().size() == 3);
+      assert(output_tensors_cn.size() == 1);
+      assert(output_tensors_cn.at(0).GetTensorTypeAndShapeInfo().GetShape().size() == 3);
 
-      //      auto &ten_cn = output_tensors_tn.at(0);
-      //softmax(ten_cn.GetTensorMutableData<float>(), ten_cn.GetTensorTypeAndShapeInfo().GetShape().at(2));
-
-      //break;
     } // while(1)
-
-    std::cout << "stepping out of the hypothesis' expansion\n";
-    //std::cout << "process_hyps: " << process_hyps.size() << std::endl;
-    //std::cout << "beam_hyps: " << beam_hyps.size() << std::endl;
   } //for(int step_t = 0; step_t < tn_shape[1]; ++step_t) {
 
+
+  #ifdef DEBUG_INF
+  for(const auto &hyp : beam_hyps) {
+    std::vector<int> prediction(hyp.prediction.cbegin() + 1, hyp.prediction.cend());
+    std::cout << "hyp: " << print_vector(prediction) << std::endl;
+  }
+  #endif
+
+
+  auto best_hyp = *std::max_element(beam_hyps.cbegin(), beam_hyps.cend(), best_fun);
+
+  std::ostringstream result;
+
+#ifdef DEBUG_INF
+  std::vector<int> test = { 2, 7, 35, 31, 22, 32, 8, 24, 48, 36, 23, 24, 30, 24, 5, 20, 10, 31, 23, 46, 32, 14, 39, 70, 25, 21 };
+  std::for_each(test.cbegin(), test.cend(), [&](const int &n) {
+    result << tokenizer.at(n);
+  });
+  std::cout << "test outcome: " << result.str() << std::endl;
+  result.str("");
+#endif
+
+  std::for_each(best_hyp.prediction.cbegin() + 1, best_hyp.prediction.cend(), [&](const int &n) {
+    result << tokenizer.at(n);
+  });
+    
+
+  std::cout << "final best_hyp: " << result.str() << std::endl;
+  
   std::cout << "stepping out of  time frame loop\n";
 }
 
