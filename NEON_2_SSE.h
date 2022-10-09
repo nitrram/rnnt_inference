@@ -544,6 +544,8 @@ _NEON2SSESTORAGE int32x2_t vraddhn_s64(int64x2_t a, int64x2_t b); // VRADDHN.I64
 _NEON2SSESTORAGE uint8x8_t vraddhn_u16(uint16x8_t a, uint16x8_t b); // VRADDHN.I16 d0,q0,q0
 _NEON2SSESTORAGE uint16x4_t vraddhn_u32(uint32x4_t a, uint32x4_t b); // VRADDHN.I32 d0,q0,q0
 _NEON2SSE_GLOBAL uint32x2_t vraddhn_u64(uint64x2_t a, uint64x2_t b); // VRADDHN.I64 d0,q0,q0
+//Division
+_NEON2SSESTORAGE float32x4_t vdivq_f32(float32x4_t a, float32x4_t b); //VMUL.F32 vrecpq_f32
 //Multiplication
 //Vector multiply: vmul -> Vr[i] := Va[i] * Vb[i]
 _NEON2SSESTORAGE int8x8_t vmul_s8(int8x8_t a, int8x8_t b); // VMUL.I8 d0,d0,d0
@@ -3522,6 +3524,8 @@ _NEON2SSE_INLINE uint16x4_t vraddhn_u32(uint32x4_t a, uint32x4_t b)
 
 _NEON2SSE_GLOBAL uint32x2_t vraddhn_u64(uint64x2_t a, uint64x2_t b); // VRADDHN.I64 d0,q0,q0
 #define vraddhn_u64 vraddhn_s64
+
+
 
 //**********************************************************************************
 //*********             Multiplication            *************************************
@@ -6837,6 +6841,18 @@ _NEON2SSE_INLINE _NEON2SSE_PERFORMANCE_WARNING(uint32x2_t vrecpe_u32(uint32x2_t 
 
 _NEON2SSE_GLOBAL float32x4_t vrecpeq_f32(float32x4_t a); // VRECPE.F32 q0,q0
 #define vrecpeq_f32 _mm_rcp_ps
+
+//**********************************************************************************
+//*********             Division            *************************************
+//**************************************************************************************
+_NEON2SSESTORAGE float32x4_t vdivq_f32(float32x4_t a, float32x4_t b);
+_NEON2SSE_INLINE float32x4_t vdivq_f32(float32x4_t a, float32x4_t b)
+{
+  float32x4_t recip0 = vrecpeq_f32(b);
+  float32x4_t recip1 = vmulq_f32(recip0, vrecpsq_f32(recip0, b));
+  return vmulq_f32(a, recip1);
+}
+
 
 
 _NEON2SSESTORAGE uint32x4_t vrecpeq_u32(uint32x4_t a); // VRECPE.U32 q0,q0
