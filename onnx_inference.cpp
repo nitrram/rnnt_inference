@@ -7,6 +7,7 @@
  * BPE ~ byte-pairs
  */
 
+#include <omp.h>
 
 #include <iostream>
 #include <sstream>
@@ -17,7 +18,8 @@
 #include <algorithm> /*std::max_element*/
 #include <cstddef> /*std::nullptr_t*/
 
-
+// sentencepiece
+#include "sp/sentencepiece_processor.h"
 
 #include "onnxruntime_cxx_api.h"
 #include "cpu_provider_factory.h"
@@ -30,8 +32,9 @@
 #include "fmadd_neon.h"
 
 
-#define WAV_FILE "../../wavs/common_voice_cs_25695144_16.wav"
+#define WAV_FILE "common_voice_cs_25695144_16.wav"
 
+#define BPE_MODEL "80_bpe.model"
 #define TN_FILE "rnnt_tn.onnx"
 #define PN_FILE "rnnt_pn.onnx"
 #define CN_FILE "rnnt_cn.onnx"
@@ -42,6 +45,8 @@
 #define MELS FBANK_TP_ROW_SIZE
 
 // forward declarations >>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+
+namespace sp=sentencepiece;
 
 enum io {
   INPUT,
@@ -134,7 +139,8 @@ the_model_inference(Ort::Session *,
                     const vec_node_names_t&,
                     const vec_node_names_t&,
                     const vec_node_names_t&,
-                    const vec_node_names_t&);
+                    const vec_node_names_t&,
+										const sp::SentencePieceProcessor &);
 
 
 // forward declarations <<<<<<<<<<<<<<<<<<<<<<<<<<<<<
@@ -190,6 +196,15 @@ main(int argc,
   std::ostringstream ossw;
 #endif
 
+	sp::SentencePieceProcessor sp_processor;
+	// init sentencepiece processor
+	const auto status = sp_processor.Load(BPE_MODEL);
+	if (!status.ok()) {
+		std::cerr << status.ToString() << std::endl;
+		// error
+		goto bail_out;
+	}
+
   if(!wav->prepare_to_read()) goto bail_out;
 
   wav_content = new int16_t[wav->get_num_samples()];
@@ -221,22 +236,22 @@ main(int argc,
   assert(inp_sizes_tn.at(0) == feat_mat_size);
 
 #ifdef DEBUG_INF
-  for(int x=0; x < tn_inp_cnt; ++x) {
+  for(size_t x=0; x < tn_inp_cnt; ++x) {
     std::cout << "TN ~input size[" << x << "] = " << inp_sizes_tn[x] << " ("<< print_vector(inp_node_dims_tn[x]) << ") <---- " << variable_len << " features in!\n";
   }
-  for(int x=0; x < tn_out_cnt; ++x) {
+  for(size_t x=0; x < tn_out_cnt; ++x) {
     std::cout << "TN ~out size[" << x << "] = " << out_sizes_tn[x] << " ("<< print_vector(out_node_dims_tn[x]) << ") <---- OUT \n";
   }
-  for(int x=0; x < pn_inp_cnt; ++x) {
+  for(size_t x=0; x < pn_inp_cnt; ++x) {
     std::cout << "PN ~input size[" << x << "] = " << inp_sizes_pn[x] << " ("<< print_vector(inp_node_dims_pn[x]) << ((x == 0) ? "<---- PN + TN joint (one hot BPE vec))\n" : "<---- neural out )\n");
   }
-  for(int x=0; x < pn_out_cnt; ++x) {
+  for(size_t x=0; x < pn_out_cnt; ++x) {
     std::cout << "PN ~out size[" << x << "] = " << out_sizes_pn[x] << " ("<< print_vector(out_node_dims_pn[x]) << ")" << ((x == 0) ? "<---- neural out\n" :"<---- parameters IN (recurrent))\n");
   }
-  for(int x=0; x < cn_inp_cnt; ++x) {
+  for(size_t x=0; x < cn_inp_cnt; ++x) {
     std::cout << "CN ~input size[" << x << "] = " << inp_sizes_cn[x] << " ("<< print_vector(inp_node_dims_cn[x]) << ((x == 0) ? "<---- joint in\n" : "<---- joint in )\n");
   }
-  for(int x=0; x < cn_out_cnt; ++x) {
+  for(size_t x=0; x < cn_out_cnt; ++x) {
     std::cout << "CN ~out size[" << x << "] = " << out_sizes_cn[x] << " ("<< print_vector(out_node_dims_cn[x]) << ")" << ((x == 0) ? "<---- joint out\n" :"<---- joint out\n");
   }
   std::cout << "===============================================\n\n";
@@ -258,7 +273,8 @@ main(int argc,
                       inp_node_names_pn,
                       out_node_names_pn,
                       inp_node_names_cn,
-                      out_node_names_cn);
+                      out_node_names_cn,
+											sp_processor);
 
   // release buffers allocated by ORT alloctor
   for(const char *node_name : inp_node_names_tn)
@@ -333,7 +349,8 @@ the_model_inference(Ort::Session *session_tn,
                     const vec_node_names_t &input_node_names_pn,
                     const vec_node_names_t &output_node_names_pn,
                     const vec_node_names_t &input_node_names_cn,
-                    const vec_node_names_t &output_node_names_cn) {
+                    const vec_node_names_t &output_node_names_cn,
+										const sp::SentencePieceProcessor &sp_processor) {
 
   auto memory_info =
     Ort::MemoryInfo::CreateCpu(OrtArenaAllocator, OrtMemTypeDefault);
@@ -651,24 +668,12 @@ the_model_inference(Ort::Session *session_tn,
 
   auto best_hyp = *std::max_element(beam_hyps.cbegin(), beam_hyps.cend(), best_fun);
 
-  std::ostringstream result;
+	std::string result;
+	auto particies = std::vector(best_hyp.prediction.cbegin() + 1, best_hyp.prediction.cend());
 
-#ifdef DEBUG_INF
-  std::vector<int> test = { 2, 7, 35, 31, 22, 32, 8, 24, 48, 36, 23, 24, 30, 24, 5, 20, 10, 31, 23, 46, 32, 14, 39, 70, 25, 21 };
-  std::for_each(test.cbegin(), test.cend(), [&](const int &n) {
-    result << tokenizer.at(n);
-  });
-  std::cout << "test outcome: " << result.str() << std::endl;
-  result.str("");
-#endif
+	sp_processor.Decode(particies, &result);
 
-  std::for_each(best_hyp.prediction.cbegin() + 1, best_hyp.prediction.cend(), [&](const int &n) {
-    result << tokenizer.at(n);
-  });
-    
-
-  std::cout << "final best_hyp: " << result.str() << std::endl;
-  
+  std::cout << "final best_hyp: " << result << std::endl;
   std::cout << "stepping out of  time frame loop\n";
 }
 

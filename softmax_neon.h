@@ -1,5 +1,7 @@
 #pragma once
 
+#include <omp.h>
+
 #define NEONSIZE 4
 #define THREADSIZE 4
 

@@ -1,3 +1,5 @@
+#include <omp.h>
+
 #include <cmath>
 #include <iostream>
 #include <sstream>
