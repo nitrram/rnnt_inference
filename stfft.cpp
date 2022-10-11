@@ -110,10 +110,7 @@ namespace spr::stfft {
         }
       }
 
-
-      std::cout << "is hamming win? " << ffth_param->hamming_en << std::endl;
       if (ffth_param->hamming_en) {
-
         if(win_len == 400) {
           ffth_param->hamming = hamming_window_400;
         } else {

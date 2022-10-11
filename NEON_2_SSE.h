@@ -3939,7 +3939,6 @@ _NEON2SSE_INLINE float32x4_t vmlaq_f32(float32x4_t a, float32x4_t b, float32x4_t
 _NEON2SSESTORAGE float32x4_t vfmaq_f32(float32x4_t a, float32x4_t b, float32x4_t c); // VMLA.F32 q0,q0,q0
 _NEON2SSE_INLINE float32x4_t vfmaq_f32(float32x4_t a, float32x4_t b, float32x4_t c) // VMLA.F32 q0,q0,q0
 {
-__m128 res;
 // NEON's vmaq_f32 has different order of arguments
 return  _mm_fmadd_ps(b, c, a);
 }

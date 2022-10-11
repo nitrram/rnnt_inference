@@ -1,3 +1,5 @@
+#include <omp.h>
+
 #include <cmath>
 #include <iostream>
 #include <sstream>
@@ -23,8 +25,6 @@ namespace spr::feat {
   }
 
   void Fbank::init() {
-    int i;
-    float tmp = 0;
     /// stft and mag params for later calculations
     m_params.fft_len = m_n_fft;
     m_params.hamming_en = true;
@@ -113,7 +113,7 @@ namespace spr::feat {
     std::cout << "stft: out_size: " << m_params.out_size << "; mag_size: " << m_params.mag_size << std::endl;
 #endif
 
-    for(int n=0; n < m_params.in_size - (m_params.pad_size * 2); ++n) {
+    for(uint32_t n=0; n < m_params.in_size - (m_params.pad_size * 2); ++n) {
       sample_aligned_t sample = SIGNED_16BIT_TO_SAMPLE(in[n], dummy);
       m_params.in[n+m_params.pad_size] = SAMPLE_TO_FLOAT_32BIT(sample, dummy);
     }
@@ -121,8 +121,7 @@ namespace spr::feat {
 #ifdef DEBUG_FEAT
     std::ostringstream ossm;
     ossm << "\nin: 20 samples = [\n";
-    for(int i=m_params.pad_size; i < m_params.pad_size + 20; ++i) {
-      //      ossm << m_params.mag[i] << ((m_params.mag_size - 1 > i) ? ", " : "]");
+    for(uint32_t i=m_params.pad_size; i < m_params.pad_size + 20; ++i) {
       ossm << m_params.in[i] << ((m_params.pad_size + 20 - 1 > i) ? ", " : "\n...]");
     }
     std::cout << ossm.str() << std::endl;
@@ -130,7 +129,7 @@ namespace spr::feat {
     ossm.str("");
 
     ossm << "\nin: 20 samples = [...\n";
-    for(int i=m_params.in_size - 21 - m_params.pad_size; i < m_params.in_size - m_params.pad_size; ++i) {
+    for(uint32_t i=m_params.in_size - 21 - m_params.pad_size; i < m_params.in_size - m_params.pad_size; ++i) {
       ossm << m_params.in[i] << ((m_params.in_size - m_params.pad_size - 1 > i) ? ", " : "\n]");
     }
     std::cout << ossm.str() << "\n\n";
@@ -142,8 +141,7 @@ namespace spr::feat {
 #ifdef DEBUG_FEAT
     std::ostringstream osst;
     osst << "\nstft: 20 samples = [\n";
-    for(int i=0; i < 20; ++i) {
-      //      osst << m_params.mag[i] << ((m_params.mag_size - 1 > i) ? ", " : "]");
+    for(uint32_t i=0; i < 20; ++i) {
       osst << "[" << m_params.out[i] << ", " << m_params.out[i+201] <<((20 - 1 > i) ? "]\n" : "]\n...]");
     }
     std::cout << osst.str() << std::endl;
@@ -151,7 +149,7 @@ namespace spr::feat {
     osst.str("");
 
     osst << "\nstft: 20 samples = [...\n";
-    for(int i=201 - 21; i < 201; ++i) {
+    for(uint32_t i=201 - 21; i < 201; ++i) {
       osst << "[" << m_params.out[i] << ", " << m_params.out[i+201] << ((201 - 1 > i) ? "]\n" : "]\n]");
     }
     std::cout << osst.str() << "\n\n";
@@ -161,7 +159,6 @@ namespace spr::feat {
     ossm.str("");
     ossm << "\nmag: 20 samples = [\n";
     for(int i=0; i < 20; ++i) {
-      //      ossm << m_params.mag[i] << ((m_params.mag_size - 1 > i) ? ", " : "]");
       ossm << m_params.mag[i] << ((20 - 1 > i) ? ", " : "\n...]");
     }
     std::cout << ossm.str() << std::endl;
@@ -186,8 +183,10 @@ namespace spr::feat {
     }
 
 
+#ifdef DEBUG_FEAT
     std::cout << "multfq: spec_row_size: " << m_params.win_inc << "; ROW: " << FBANK_TP_ROW_SIZE << "; COL: " << FBANK_TP_COL_SIZE << "\n";
     std::cout << "multfq: mag_size: " << m_params.mag_size << "\n\n";
+#endif
 
     // jump along spectrum's rows
 #pragma omp parallel for num_threads(THREADSIZE)
@@ -200,12 +199,12 @@ namespace spr::feat {
 #ifdef DEBUG_FEAT
         if(spec_i == 358 && fi == 0) {
           std::cout <<"multfq: first mag: [";
-          for(int i = 0; i < FBANK_TP_COL_SIZE; ++i) {
+          for(size_t i = 0; i < FBANK_TP_COL_SIZE; ++i) {
             std::cout << m_params.mag[i + spec_i*FBANK_TP_COL_SIZE] << (i < FBANK_TP_COL_SIZE -1 ? ", " : "\n]\n");
           }
 
           std::cout << "multfq: first fbank: [";
-          for(int i=0; i < FBANK_TP_COL_SIZE; ++i) {
+          for(size_t i=0; i < FBANK_TP_COL_SIZE; ++i) {
             std::cout << FBANK_80_MELS_201_FFT_TP[i + fi*FBANK_TP_COL_SIZE] << (i < FBANK_TP_COL_SIZE -1 ? ", " : "\n]\n");
           }
         }
@@ -244,5 +243,5 @@ namespace spr::feat {
 
     return E_OK;
   }
-
 }
+//eof
