@@ -331,7 +331,6 @@ namespace spr {
     int16_t sampleCh2 = 0;
     const uint32_t numBytes = (m_num_channels * m_byte_depth);
     uint8_t sampleBytes[numBytes];
-    uint8_t tmp_byte;
     for (uint32_t i = 0; i < num_samples; i++) {
       read_data(sampleBytes, numBytes);      
       read_int16_from_data(sampleBytes,

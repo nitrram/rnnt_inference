@@ -452,7 +452,7 @@ util::Status SentencePieceProcessor::Decode(
       } else {
         const absl::string_view utf8 =
             absl::string_view(bytes).substr(offset, consumed);
-        for (int j = 0; j < consumed; j++) {
+        for (size_t j = 0; j < consumed; j++) {
           // The last byte piece holds the surface of the original unknown
           // character. The other byte pieces hold an empty string as
           // surface.

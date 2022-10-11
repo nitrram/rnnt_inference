@@ -50,13 +50,13 @@ set(SPM_SRCS
   ${SPM_PROTO_SRCS}
   ${SPM_MODEL_PROTO_HDRS}
   ${SPM_MODEL_PROTO_SRCS}
-	${ABSL_FLAGS_SRCS}
+  ${ABSL_FLAGS_SRCS}
   sp/bpe_model.h
   sp/common.h
   sp/normalizer.h
   sp/freelist.h
   sp/filesystem.h
-	sp/init.h
+  sp/init.h
   sp/util.h
   sp/sentencepiece_processor.h
   sp/model_factory.h
@@ -81,10 +81,10 @@ find_package(OpenMP REQUIRED)
 
 
 add_compile_options(
-  #  -DDEBUG_STFT
-  #  -DDEBUG_FEAT
-  # -DDEBUG_WAV
-  -DDEBUG_INF
+#  -DDEBUG_STFT
+#  -DDEBUG_FEAT
+#  -DDEBUG_WAV
+#  -DDEBUG_INF
   -pthread #protobuf
   -DHAVE_PTHREAD=1 #protobuf
   -mfma #neon
@@ -92,10 +92,10 @@ add_compile_options(
   -fno-permissive
   -Wno-deprecated-declarations
   -std=c++17
-# -O3
+  -O3
   -Wall
   -fPIC
-#	-fopenmp
+  -Ofast
 )
 
 add_executable( # Sets the name of the library.
@@ -121,7 +121,7 @@ target_compile_definitions(onnxinfer
 
 target_link_libraries(
   onnxinfer
-	PRIVATE
+  PRIVATE
   ${ONNXRUNTIME_PATH}
-	${OpenMP_CXX_FLAGS}
+  ${OpenMP_CXX_FLAGS}
 )
