@@ -1,19 +1,10 @@
 #pragma once
 
+#include "common_neon.h"
+
 #include <omp.h>
 
-#define NEONSIZE 4
-#define THREADSIZE 4
-
-#if defined(__aarch64__) || defined(__ARM_ARCH)
-#include <arm_neon.h>
-#elif defined(__x86_64__)
-#include "NEON_2_SSE.h"
-#endif
-
 #include <cmath>
-#include <iostream>
-#include <iomanip>
 
 
 /* exp() computed for 4 float at once */
@@ -184,17 +175,28 @@ namespace routines {
 
 void softmax(float *io, uint32_t size) {
 
+
+#ifdef DEBUG_INF
+  float orig = io[0];
+#endif
+
   double sum = 0.0;
-#pragma omp parallel for num_threads(THREADSIZE)
+#pragma omp parallel for num_threads(THREADSIZE) reduction(+: sum)
   for(uint32_t i=0; i < size; ++i) {
     sum += std::exp((double)io[i]);
   }
 
   sum = std::log(sum);
 
-#pragma omp parallel for num_threads(THREADSIZE)
+#pragma omp parallel for num_threads(THREADSIZE) shared(sum, io)
   for(uint32_t i=0; i<size; ++i) {
-    io[i] -= sum;
+    io[i] -= (float)sum;
+
+#ifdef DEBUG_INF
+    if(io[i] > 10.0) {
+      std::cout << "SFTMX: orig: " << orig << ", io[" << i << "]: " << io[i] << ", sum: " << sum << std::endl;
+    }
+#endif
   }
 }
 
@@ -225,8 +227,8 @@ inline void softmax(float *io, uint32_t size) {
       std::cout << load_data[1] << ", ";
       std::cout << load_data[2] << ", ";
       std::cout << load_data[3] << "\n";
-    } 
-    
+    }
+
     result_data = vaddq_f32(result_data, exp_ps(load_data));
     io += NEONSIZE;
   }

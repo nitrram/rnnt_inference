@@ -35,14 +35,15 @@
 #include "wavread.h"
 #include "feat.h"
 #include "fmadd_neon.h"
+#include "copy_neon.h"
 
 
 #define WAV_FILE "common_voice_cs_25695144_16.wav"
 
 #define BPE_MODEL "80_bpe.model"
-#define TN_FILE "rnnt_tn.onnx"
-#define PN_FILE "rnnt_pn.onnx"
-#define CN_FILE "rnnt_cn.onnx"
+#define TN_FILE "rnnt_tn.ort"
+#define PN_FILE "rnnt_pn.ort"
+#define CN_FILE "rnnt_cn.ort"
 
 #define BEAM_SIZE 3
 #define STATE_BEAM 4.6f
@@ -83,7 +84,8 @@ print_vector(const std::vector<T> &vec) {
 struct token_t {
   std::vector<int> prediction;
   float logp_score;
-  Ort::Value *hidden_state;
+  float *hidden_state;
+  bool hidden_state_present; // this is the opt for preventing algorithm copying buffer of zeros
 };
 
 size_t create_feat_inp(const int16_t*, size_t, float**);
@@ -289,7 +291,7 @@ main(int argc,
 
   end = std::chrono::system_clock::now();
 
-  std::cout << result << " (" << std::chrono::duration_cast<std::chrono::milliseconds>(end - start).count() << "[ms])\n";
+  std::cout << std::endl << result << " (" << std::chrono::duration_cast<std::chrono::milliseconds>(end - start).count() << "[ms])\n";
 
   // release buffers allocated by ORT alloctor
   for(const char *node_name : inp_node_names_tn)
@@ -353,7 +355,7 @@ the_model_inference(Ort::Session *session_tn,
                     Ort::Session *session_cn,
                     const float *enc_inp,
                     size_t target_size_tn/* win_inc * out_bpe*/,
-                    const std::vector<size_t> &target_sizes_pn, /*size of embedding  ~ BPE -1*/
+                    const std::vector<size_t> &target_sizes_pn, /*size of embedding  ~ BPE -1 and hidden_state */
                     size_t target_size_cn,
                     const dims_size_t &tn_inp_dims,
                     const vec_dims_size_t &pn_inp_dims_vec,
@@ -390,6 +392,10 @@ the_model_inference(Ort::Session *session_tn,
 
   float embedding[target_sizes_pn.at(0)];
   float pn_state_buffer[target_sizes_pn.at(1)];
+#ifdef DEBUG_INF
+  std::cout << "PN state buffer size: " << target_sizes_pn.at(1) << std::endl;
+#endif
+
   float pre_alloc_sum_gelu[target_size_cn];
 
   // init embedding
@@ -398,7 +404,7 @@ the_model_inference(Ort::Session *session_tn,
   for(size_t i=0; i<target_sizes_pn.at(1); pn_state_buffer[i++]=0.0f);
 
   std::vector<Ort::Value> input_tensors_pn;
-  vec_hyps beam_hyps = {{ .prediction = {0}, .logp_score = .0f }};
+  vec_hyps beam_hyps = {{ .prediction = {0}, .logp_score = .0f, .hidden_state = pn_state_buffer, .hidden_state_present = false }};
   vec_hyps process_hyps;
 
   vec_hyps::const_iterator a_best_it, b_best_it;
@@ -407,8 +413,8 @@ the_model_inference(Ort::Session *session_tn,
     return left.logp_score / left.prediction.size() < right.logp_score / right.prediction.size(); };
 
 #ifdef DEBUG_INF
-  bool _tmp_rem = false;
-  int _tmp_debug_step = 18;
+	//  bool _tmp_rem = false;
+  int _tmp_debug_step = 0;
 #endif
 
   //e.g. 89x [1,1,512]
@@ -434,7 +440,10 @@ the_model_inference(Ort::Session *session_tn,
 
       a_best_it = std::max_element(process_hyps.cbegin(), process_hyps.cend(), best_fun);
 
-      if(a_best_it == process_hyps.cend()) break;
+      if(a_best_it == process_hyps.cend()) {
+        std::cerr << "Processed hypothesises's been empty. Breaking out of the loop\n";
+        break;
+      }
 
       auto a_best_tok = *a_best_it;
 
@@ -450,7 +459,6 @@ the_model_inference(Ort::Session *session_tn,
 
       if(a_best_it != process_hyps.cend())
         process_hyps.erase(a_best_it);
-
 
 #ifdef DEBUG_INF
       if(!_tmp_rem && step_t == 0) {
@@ -469,6 +477,7 @@ the_model_inference(Ort::Session *session_tn,
                 pn_inp_dims_vec,
                 input_node_names_pn,
                 output_node_names_pn);
+
 
 #ifdef DEBUG_INF
       if(!_tmp_rem && step_t == _tmp_debug_step) {
@@ -529,12 +538,10 @@ the_model_inference(Ort::Session *session_tn,
 
       const float *log_probs_raw = output_tensors_cn.at(0).GetTensorData<float>();
 
-      ///fixme -> make the sorting NEON style
       auto top_log_probs = find_top_k_probs(log_probs_raw, output_tensors_cn.at(0).GetTensorTypeAndShapeInfo().GetShape()[2]);
 
 
 #ifdef DEBUG_INF
-      //      if(step_t == _tmp_debug_step) {
       if(true) {
         std::cout << "top3: [" <<
         std::get<0>(top_log_probs.at(0)) << "|" << std::get<1>(top_log_probs.at(0)) << ", " <<
@@ -556,13 +563,19 @@ the_model_inference(Ort::Session *session_tn,
 
         token_t top_hyp = {
               .prediction = a_best_tok.prediction,
-              .logp_score = a_best_tok.logp_score + std::get<0>(top_log_probs.at(step_e))
+              .logp_score = a_best_tok.logp_score + std::get<0>(top_log_probs.at(step_e)),
+              .hidden_state = pn_state_buffer,
+              .hidden_state_present = false
         };
 
         // if the found top scored label is equal to blank, expand beam hypothesis
         if(std::get<1>(top_log_probs.at(step_e)) == 0) {
-          if(a_best_tok.hidden_state && *a_best_tok.hidden_state != Ort::Value(nullptr))
-            top_hyp.hidden_state = new Ort::Value((OrtValue*)a_best_tok.hidden_state);
+
+          if(a_best_tok.hidden_state_present) {
+            top_hyp.hidden_state = new float[target_sizes_pn.at(1)];
+            fcopy(a_best_tok.hidden_state, top_hyp.hidden_state, target_sizes_pn.at(1));
+            top_hyp.hidden_state_present = a_best_tok.hidden_state_present; //true
+          }
 
           beam_hyps.emplace_back(std::move(top_hyp));
 
@@ -577,9 +590,11 @@ the_model_inference(Ort::Session *session_tn,
         if(std::get<0>(top_log_probs.at(step_e)) >= best_logp - EXPAND_BEAM) {
 
           top_hyp.prediction.emplace_back(std::get<1>(top_log_probs.at(step_e)));
-          top_hyp.hidden_state = ((output_tensors_pn.at(1) != Ort::Value(nullptr)) ?
-                                  new Ort::Value( (OrtValue*)output_tensors_pn.at(1) ) :
-                                  new Ort::Value(nullptr));
+          if(output_tensors_pn.at(1) != Ort::Value(nullptr)) {
+            top_hyp.hidden_state = new float[target_sizes_pn.at(1)];
+            fcopy(output_tensors_pn.at(1).GetTensorData<float>(), top_hyp.hidden_state, target_sizes_pn.at(1));
+            top_hyp.hidden_state_present = true;
+          }
 
           process_hyps.emplace_back(std::move(top_hyp));
 
@@ -595,7 +610,20 @@ the_model_inference(Ort::Session *session_tn,
       assert(output_tensors_cn.at(0).GetTensorTypeAndShapeInfo().GetShape().size() == 3);
 
     } // while(1)
+
+
+#ifdef DEBUG_INF
+  for(const auto &hyp : beam_hyps) {
+    std::vector<int> prediction(hyp.prediction.cbegin() + 1, hyp.prediction.cend());
+    std::cout << "hyp: " << print_vector(prediction) << std::endl;
+    std::string rr;
+    sp_processor.Decode(prediction, &rr);
+    std::cout << "hyp_str: " << rr << "\n\n";
+  }
+#endif
+
   } //for(int step_t = 0; step_t < tn_shape[1]; ++step_t) {
+
 
 #ifdef DEBUG_INF
   for(const auto &hyp : beam_hyps) {
@@ -603,6 +631,7 @@ the_model_inference(Ort::Session *session_tn,
     std::cout << "hyp: " << print_vector(prediction) << std::endl;
   }
 #endif
+
 
   auto best_hyp = *std::max_element(beam_hyps.cbegin(), beam_hyps.cend(), best_fun);
 
@@ -637,8 +666,9 @@ predict(Ort::Session *session_pn,
                                     pn_inp_dims_vec.at(0).size())
   );
 
+  // previous state's data should be already copied and isolated
   input_tensors_pn.push_back(
-    Ort::Value::CreateTensor<float>(memory_info, pre_alloc_state,
+    Ort::Value::CreateTensor<float>(memory_info, best_hyp.hidden_state,//pre_alloc_state,
                                     target_sizes_pn.at(1), pn_inp_dims_vec.at(1).data(),
                                     pn_inp_dims_vec.at(1).size())
   );
@@ -668,8 +698,9 @@ joint(Ort::Session *session_cn,
       const vec_node_names_t &output_node_names_cn) {
 
   float sum;
-  // logp = logp(tn) + logp(pn)
+
   // lin_input = gelu(logp)
+#pragma omp parallel for num_threads(THREADSIZE) private(sum)
   for(size_t i=0; i<target_size_cn; ++i) {
 
     // sum log probabilities from TN and PN
@@ -679,16 +710,33 @@ joint(Ort::Session *session_cn,
     pre_alloc_sum_gelu[i] = 0.5f * sum * (1.0f + std::tanh(std::sqrt(2.0f / M_PI) * (sum + 0.044715f * std::pow(sum, 3.0f))));
   }
 
+
+#ifdef DEBUG_INF
+  std::cout << "JOINT IN dim: " << print_vector(cn_inp_dims) << std::endl;
+  std::cout << "JOINT IN: [\n";
+  for(size_t i=0; i< target_size_cn; ++i) {
+    std::cout << pre_alloc_sum_gelu[i] << (i < target_size_cn - 1 ? ", " : "\n]\n");
+  }
+#endif
+
   Ort::Value joint_in = Ort::Value::CreateTensor<float>(memory_info, pre_alloc_sum_gelu,
                                                         target_size_cn, cn_inp_dims.data(),
                                                         cn_inp_dims.size());
-  auto joint_out =
+
+  auto result =
     session_cn->Run(Ort::RunOptions(nullptr), input_node_names_cn.data(),
                     &joint_in, 1, output_node_names_cn.data(), output_node_names_cn.size());
 
-  return joint_out;
-}
+#ifdef DEBUG_INF
+  auto *data  = result.at(0).GetTensorMutableData<float>();
+  std::cout << "JOINT OUT: [\n";
+  for(size_t i=0; i < 512; ++i) {
+    std::cout << data[i] << (i < target_size_cn - 1 ? ", " : "\n]\n");
+  }
+#endif
 
+  return result;
+}
 
 size_t
 create_feat_inp(const int16_t *wav_con,

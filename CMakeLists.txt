@@ -96,6 +96,8 @@ add_compile_options(
   -Wall
   -fPIC
   -Ofast
+#  -march=znver3
+  -march=native
 )
 
 add_executable( # Sets the name of the library.
