@@ -1,17 +1,7 @@
 #pragma once
 
-#define NEONSIZE 4
-#define THREADSIZE 4
+#include "common_neon.h"
 
-#if defined(__aarch64__) || defined(__ARM_ARCH)
-#include <arm_neon.h>
-#elif defined(__x86_64__)
-#include "NEON_2_SSE.h"
-#endif
-
-#ifdef DEBUG
-#include <iostream>
-#endif
 
 inline float fmadd(const float *in1, const float *in2, uint32_t size) {
 
@@ -23,8 +13,6 @@ inline float fmadd(const float *in1, const float *in2, uint32_t size) {
     result_data[2] = 0;
     result_data[3] = 0;
 
-    //    std::cout << "fmadd: [" << *in1 << " + " << *in2 << "]\n";
-    
     for (uint32_t i = 0; i < cnt_block; ++i) {
         load_data1 = vld1q_f32(in1);
         load_data2 = vld1q_f32(in2);
