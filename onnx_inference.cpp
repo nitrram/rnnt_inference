@@ -163,7 +163,11 @@ main(int argc,
   //#endif
 
   auto *wav = new spr::wavread();
-  wav->init(WAV_FILE);
+  if(argc == 2) {
+    wav->init(argv[1]);
+  } else {
+    wav->init(WAV_FILE);
+  }
 
   auto *ortenv = new Ort::Env{ORT_LOGGING_LEVEL_WARNING, "onnxinfere"};
   Ort::SessionOptions so;
@@ -301,10 +305,16 @@ main(int argc,
     allocator_for_tn.Free(const_cast<void*>(reinterpret_cast<const void*>(node_name)));
 
   for(const char *node_name : inp_node_names_pn)
-    allocator_for_tn.Free(const_cast<void*>(reinterpret_cast<const void*>(node_name)));
+    allocator_for_pn.Free(const_cast<void*>(reinterpret_cast<const void*>(node_name)));
 
   for(const char *node_name : out_node_names_pn)
-    allocator_for_tn.Free(const_cast<void*>(reinterpret_cast<const void*>(node_name)));
+    allocator_for_pn.Free(const_cast<void*>(reinterpret_cast<const void*>(node_name)));
+
+  for(const char *node_name : inp_node_names_cn)
+    allocator_for_cn.Free(const_cast<void*>(reinterpret_cast<const void*>(node_name)));
+
+  for(const char *node_name : out_node_names_cn)
+    allocator_for_cn.Free(const_cast<void*>(reinterpret_cast<const void*>(node_name)));
 
 
   delete []feat_inp;
