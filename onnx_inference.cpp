@@ -311,8 +311,10 @@ main(int argc,
   delete []wav_content;
 
  bail_out:
-  delete session_pn;
+
   delete session_tn;
+  delete session_pn;
+  delete session_cn;
   delete ortenv;
 
   wav->deallocate();
@@ -413,7 +415,7 @@ the_model_inference(Ort::Session *session_tn,
     return left.logp_score / left.prediction.size() < right.logp_score / right.prediction.size(); };
 
 #ifdef DEBUG_INF
-	//  bool _tmp_rem = false;
+  //  bool _tmp_rem = false;
   int _tmp_debug_step = 0;
 #endif
 
