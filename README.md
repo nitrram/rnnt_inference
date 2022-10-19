@@ -16,5 +16,5 @@ Copy the wav (common_voice_cs_25695144_16.wav) next to the exe binary too.
 
 
 # Run
-./onnxinfere [path_to_16bit_16khz_wav]
+./onnxinfer [path_to_16bit_16khz_wav]
  
