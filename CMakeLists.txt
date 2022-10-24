@@ -76,6 +76,10 @@ include_directories(${CMAKE_CURRENT_SOURCE_DIR}/sp/third_party) #absl
 include_directories(${CMAKE_CURRENT_SOURCE_DIR}/sp/pb)
 include_directories(${CMAKE_CURRENT_SOURCE_DIR}/sp)
 
+include_directories(${CMAKE_CURRENT_SOURCE_DIR}/gen)
+include_directories(${CMAKE_CURRENT_SOURCE_DIR}/ort)
+include_directories(${CMAKE_CURRENT_SOURCE_DIR}/wav)
+include_directories(${CMAKE_CURRENT_SOURCE_DIR}/common)
 
 find_package(OpenMP REQUIRED)
 
@@ -96,8 +100,8 @@ add_compile_options(
   -Wall
   -fPIC
   -Ofast
-#  -march=znver3
-  -march=native
+  -march=znver3
+#  -march=native
 )
 
 add_executable( # Sets the name of the library.
@@ -106,9 +110,12 @@ add_executable( # Sets the name of the library.
   ${SPM_SRCS}
 
   # Provides a relative path to your source file(s).
+  wav/wavread.cpp
   stfft.cpp
-  wavread.cpp
   feat.cpp
+  beam_search.cpp
+  input_processing.cpp
+  rnnt_attrs.cpp
   onnx_inference.cpp)
 
 set(ONNXRUNTIME_PATH ${CMAKE_CURRENT_SOURCE_DIR}/libonnxruntime.so)

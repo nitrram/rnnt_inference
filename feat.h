@@ -10,7 +10,7 @@ namespace spr::feat {
 
   constexpr int SAMPLE_RATE = 16000;
   constexpr int FFT_LEN = 400;
-  
+
 
   enum FBANK_ERROR_CAUSE {
     E_OK = 0,
@@ -35,7 +35,7 @@ namespace spr::feat {
   class Fbank {
   public:
 
-    Fbank(int sample_rate, int n_mels, int n_fft);
+    Fbank(int sample_rate, int n_fft);
 
     ///info: hz <-> mel translation
     /*
