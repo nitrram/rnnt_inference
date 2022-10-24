@@ -201,7 +201,7 @@ namespace spr::stfft {
       std::cout << "\nfirst 20 stft samples:\n";
 #endif
 
-#pragma omp parallel for num_threads(THREADSIZE)
+#pragma omp parallel for num_threads(THREADSIZE) default(none) shared(out_w, out, in, kernel)
       for (uint32_t idx = 0; idx < ffth_param->out_size; ++idx) {
         uint32_t i, j;
         i = idx / out_w;
@@ -220,7 +220,7 @@ namespace spr::stfft {
 
       // compute spectral magnitude out of the complex signal
       uint32_t imag_start = (fft_len >> 1) + 1;
-#pragma omp parallel for num_threads(THREADSIZE)
+#pragma omp parallel for num_threads(THREADSIZE) default(none) shared(size, out, imag_start, mag)
       for(uint32_t idx = 0; idx < size; idx += (fft_len + 2)) {
         //        std::cout << "mag comp idxs: [" << idx << ", " << (idx + imag_start) << ", " << (idx >> 1) << "]\n";
         fpowadd2in(out + idx, out + (idx + imag_start), mag + (idx >> 1), imag_start);
@@ -232,7 +232,7 @@ namespace spr::stfft {
     memset(out, 0, ffth_param->out_size * sizeof(float));
     uint32_t in_w = fft_len + 2;
     for (uint32_t i = 0; i < win_inc; ++i) {
-#pragma omp parallel for num_threads(THREADSIZE)
+#pragma omp parallel for num_threads(THREADSIZE) default(none) shared(out, i, in, in_w, kernel)
       for (uint32_t j = 0; j < fft_len; ++j) {
         out[i * win_shift + j] += fmadd(in + i * in_w, kernel + j * in_w, in_w);
       }

@@ -17,7 +17,7 @@ namespace spr::feat {
 
   const float Fbank::MATLAB_pi = 3.141592653589793;
 
-  Fbank::Fbank(int sample_rate, int n_mels, int n_fft) :
+  Fbank::Fbank(int sample_rate, int n_fft) :
     m_n_fft(n_fft),
     m_sr(sample_rate),
     m_process(nullptr) {
