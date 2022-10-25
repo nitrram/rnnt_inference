@@ -48,6 +48,8 @@ namespace spr::inference {
     m_session_pn = create_session(m_ort_env, so, model_pn_path, input_buffer_win_len);
     m_session_cn = create_session(m_ort_env, so, model_cn_path, input_buffer_win_len);
 
+    m_last_input_buffer_len = input_buffer_win_len;
+
     m_sp_processor = new sp::SentencePieceProcessor();
     const auto status = m_sp_processor->Load(model_sp_path);
     if (!status.ok()) {
@@ -137,52 +139,60 @@ namespace spr::inference {
 
   void rnnt_attrs::reset_buffer_win_len(int64_t input_buffer_win_len) {
 
-    // TN
-    auto *session = m_session_tn.session;
-    for(size_t i=0; i< session->GetInputCount(); ++i) {
+    if(m_last_input_buffer_len != input_buffer_win_len) {
 
-      auto type_info = session->GetInputTypeInfo(i);
-      auto tensor_info = type_info.GetTensorTypeAndShapeInfo();
-      m_session_tn.inp_node_dims[i] = tensor_info.GetShape();
+      // TN
+      auto *session = m_session_tn.session;
+      for(size_t i=0; i< session->GetInputCount(); ++i) {
 
-      m_session_tn.inp_sizes[i] = 1L;
+        auto type_info = session->GetInputTypeInfo(i);
+        auto tensor_info = type_info.GetTensorTypeAndShapeInfo();
+        m_session_tn.inp_node_dims[i] = tensor_info.GetShape();
 
-      for(size_t j=0; j<m_session_tn.inp_node_dims[i].size(); ++j) {
-        if(m_session_tn.inp_node_dims[i][j] < 1) m_session_tn.inp_node_dims[i][j] = input_buffer_win_len;
-        m_session_tn.inp_sizes[i] *= m_session_tn.inp_node_dims[i][j];
+        m_session_tn.inp_sizes[i] = 1L;
+
+        for(size_t j=0; j<m_session_tn.inp_node_dims[i].size(); ++j) {
+          if(m_session_tn.inp_node_dims[i][j] < 1) m_session_tn.inp_node_dims[i][j] = input_buffer_win_len;
+          m_session_tn.inp_sizes[i] *= m_session_tn.inp_node_dims[i][j];
+        }
       }
-    }
 
-    // PN
-    session = m_session_pn.session;
-    for(size_t i=0; i< session->GetInputCount(); ++i) {
+      // PN
+      session = m_session_pn.session;
+      for(size_t i=0; i< session->GetInputCount(); ++i) {
 
-      auto type_info = session->GetInputTypeInfo(i);
-      auto tensor_info = type_info.GetTensorTypeAndShapeInfo();
-      m_session_pn.inp_node_dims[i] = tensor_info.GetShape();
+        auto type_info = session->GetInputTypeInfo(i);
+        auto tensor_info = type_info.GetTensorTypeAndShapeInfo();
+        m_session_pn.inp_node_dims[i] = tensor_info.GetShape();
 
-      m_session_pn.inp_sizes[i] = 1L;
+        m_session_pn.inp_sizes[i] = 1L;
 
-      for(size_t j=0; j<m_session_pn.inp_node_dims[i].size(); ++j) {
-        if(m_session_pn.inp_node_dims[i][j] < 1) m_session_pn.inp_node_dims[i][j] = input_buffer_win_len;
-        m_session_pn.inp_sizes[i] *= m_session_pn.inp_node_dims[i][j];
+        for(size_t j=0; j<m_session_pn.inp_node_dims[i].size(); ++j) {
+          if(m_session_pn.inp_node_dims[i][j] < 1) m_session_pn.inp_node_dims[i][j] = input_buffer_win_len;
+          m_session_pn.inp_sizes[i] *= m_session_pn.inp_node_dims[i][j];
+        }
       }
-    }
 
-    // CN
-    session = m_session_cn.session;
-    for(size_t i=0; i< session->GetInputCount(); ++i) {
+      // CN
+      session = m_session_cn.session;
+      for(size_t i=0; i< session->GetInputCount(); ++i) {
 
-      auto type_info = session->GetInputTypeInfo(i);
-      auto tensor_info = type_info.GetTensorTypeAndShapeInfo();
-      m_session_cn.inp_node_dims[i] = tensor_info.GetShape();
+        auto type_info = session->GetInputTypeInfo(i);
+        auto tensor_info = type_info.GetTensorTypeAndShapeInfo();
+        m_session_cn.inp_node_dims[i] = tensor_info.GetShape();
 
-      m_session_cn.inp_sizes[i] = 1L;
+        m_session_cn.inp_sizes[i] = 1L;
 
-      for(size_t j=0; j<m_session_cn.inp_node_dims[i].size(); ++j) {
-        if(m_session_cn.inp_node_dims[i][j] < 1) m_session_cn.inp_node_dims[i][j] = input_buffer_win_len;
-        m_session_cn.inp_sizes[i] *= m_session_cn.inp_node_dims[i][j];
+        for(size_t j=0; j<m_session_cn.inp_node_dims[i].size(); ++j) {
+          if(m_session_cn.inp_node_dims[i][j] < 1) m_session_cn.inp_node_dims[i][j] = input_buffer_win_len;
+          m_session_cn.inp_sizes[i] *= m_session_cn.inp_node_dims[i][j];
+        }
       }
+
+
+      m_last_input_buffer_len = input_buffer_win_len;
+    } else {
+      std::cerr << "Reseting buffer length with no effect.\n";
     }
   }
 }
