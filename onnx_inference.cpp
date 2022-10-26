@@ -25,7 +25,6 @@
 #include <thread>
 #include <functional>
 
-
 #define WAV_FILE "common_voice_cs_25695144_16.wav"
 
 #define BPE_MODEL "80_bpe.model"
@@ -107,7 +106,6 @@ main(int argc,
 }
 
 void inference(spr::inference::rnnt_attrs *rnnt_attrs, const buf_t *buffer, size_t buffer_len, std::string *result) {
-//void inference(spr::inference::rnnt_attrs *rnnt_attrs, const buf_t *buffer, size_t buffer_len) {
   
   float *feat_inp = nullptr;
   size_t feats_num = spr::inference::create_feat_inp(buffer, buffer_len, &feat_inp);
