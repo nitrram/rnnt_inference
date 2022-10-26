@@ -7,6 +7,7 @@
  * BPE ~ byte-pairs
  */
 
+#include "common/buf_type.h"
 #include "input_processing.h" // transforms wav stream into normalized features
 #include "model_structs.h"
 #include "beam_search.h"
@@ -21,6 +22,8 @@
 #include <ctime>
 //#endif
 
+#include <thread>
+#include <functional>
 
 #define WAV_FILE "common_voice_cs_25695144_16.wav"
 
@@ -41,6 +44,9 @@ enum INFERENCE_STATUS {
   E_WAV = -2
 };
 
+
+static void inference(spr::inference::rnnt_attrs *, const buf_t *, size_t, std::string *);
+static void callback(const std::string &);
 
 int
 main(int argc,
@@ -69,35 +75,28 @@ main(int argc,
     return E_WAV;
   }
 
-  auto * wav_content = new int16_t[wav->get_num_samples()];
+  auto * wav_content = new buf_t[wav->get_num_samples()];
 
   // create int16_t* buffer for features
   wav->read_data_to_int16(wav_content, wav->get_num_samples());
 
   start = std::chrono::system_clock::now();
 
-  float *feat_inp = nullptr;
-  size_t feats_num = spr::inference::create_feat_inp(wav_content, wav->get_num_samples(), &feat_inp);
-  spr::inference::norm_inp(feat_inp, feats_num);
-
-  // this is very important: you need to project the matrix size into the attributes
-  rnnt_attrs->reset_buffer_win_len((int64_t)feats_num);
-
-
-  // result
-  spr::inference::beam_search searcher(rnnt_attrs);
-  auto result = searcher.decode(feat_inp, [](const std::string &) {});
+  // run inference on a separate thread
+  std::string result;
+  //  std::thread runner(inference, rnnt_attrs, wav_content, wav->get_num_samples(), result);
+  std::thread runner(inference, rnnt_attrs, wav_content, wav->get_num_samples(), &result);
+  runner.join();
 
   end = std::chrono::system_clock::now();
 
   std::ostringstream  oss;
-  oss << result << " (" <<
+  oss << "\r" << result << " (" <<
     std::chrono::duration_cast<std::chrono::milliseconds>(end -start).count() <<
     "[ms])";
   std::cout << oss.str() << std::endl;
 
 
-  delete []feat_inp;
   delete []wav_content;
 
   wav->deallocate();
@@ -105,4 +104,30 @@ main(int argc,
 
   return 0;
 }
+
+void inference(spr::inference::rnnt_attrs *rnnt_attrs, const buf_t *buffer, size_t buffer_len, std::string *result) {
+  
+  float *feat_inp = nullptr;
+  size_t feats_num = spr::inference::create_feat_inp(buffer, buffer_len, &feat_inp);
+  spr::inference::norm_inp(feat_inp, feats_num);
+  
+  // this is very important: you need to project the matrix size into the attributes
+  rnnt_attrs->reset_buffer_win_len((int64_t)feats_num);
+  
+  
+  // result
+  spr::inference::beam_search searcher(rnnt_attrs);
+
+  auto callback_fn = std::bind(callback, std::placeholders::_1);
+  
+  *result = searcher.decode(feat_inp, callback_fn);
+
+  delete []feat_inp;
+}
+
+void callback(const std::string &part_hyp) {
+  /// not implemented (yet)
+  std::cout << "\r" << part_hyp << std::flush;
+}
+
 //eof

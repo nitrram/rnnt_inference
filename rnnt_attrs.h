@@ -124,6 +124,8 @@ namespace spr::inference {
 
     sp::SentencePieceProcessor *m_sp_processor{};
 
+    int64_t m_last_input_buffer_len;
+
     bool m_is_initialized;
   };
 }
