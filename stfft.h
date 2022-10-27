@@ -1,5 +1,7 @@
 #pragma once
 
+#include <cstdint>
+
 namespace spr::stfft {
 
   enum FFT_MODE_E {

@@ -12,6 +12,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.!
 
+#include "beam_search.h"
+#include "common/softmax_neon.h"
+#include "common/copy_neon.h"
+
 // Onnx headers
 #include <cpu_provider_factory.h>
 
@@ -21,12 +25,6 @@
 #include <iostream>
 #include <cmath>
 #include <cassert>
-
-
-#include "softmax_neon.h"
-#include "copy_neon.h"
-#include "beam_search.h"
-
 
 namespace spr::inference {
 

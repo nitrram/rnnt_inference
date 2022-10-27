@@ -1,15 +1,16 @@
+#include "stfft.h"
+
+#include "common/fmadd_neon.h"
+
 #include <omp.h>
 
-#include <sstream>
 #include <iostream>
-#include <iomanip>
-#include <cmath>
-#include <chrono>
+#include <sstream>
 #include <cstring>
 #include <cassert>
-#include "stfft.h"
-#include "fmadd_neon.h"
-
+#include <iomanip>
+#include <chrono>
+#include <cmath>
 
 
 static float hamming_window_400[] = {

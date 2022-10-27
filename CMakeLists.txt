@@ -76,47 +76,53 @@ include_directories(${CMAKE_CURRENT_SOURCE_DIR}/sp/third_party) #absl
 include_directories(${CMAKE_CURRENT_SOURCE_DIR}/sp/pb)
 include_directories(${CMAKE_CURRENT_SOURCE_DIR}/sp)
 
-include_directories(${CMAKE_CURRENT_SOURCE_DIR}/gen)
+include_directories(${CMAKE_CURRENT_SOURCE_DIR})
 include_directories(${CMAKE_CURRENT_SOURCE_DIR}/ort)
-include_directories(${CMAKE_CURRENT_SOURCE_DIR}/wav)
-include_directories(${CMAKE_CURRENT_SOURCE_DIR}/common)
+
 
 find_package(OpenMP REQUIRED)
 
-
-add_compile_options(
-#  -DDEBUG_STFT
-#  -DDEBUG_FEAT
-#  -DDEBUG_WAV
-#  -DDEBUG_INF
-  -pthread #protobuf
-  -DHAVE_PTHREAD=1 #protobuf
-  -mfma #neon
-  -mavx2 #neon
-  -fno-permissive
-  -Wno-deprecated-declarations
-  -std=c++17
-  -O3
-  -Wall
-  -fPIC
-  -Ofast
-#  -march=znver3
-  -march=native
-)
-
-add_executable( # Sets the name of the library.
-  onnxinfer
-
-  ${SPM_SRCS}
-
-  # Provides a relative path to your source file(s).
+set(CXX_SRCS
   wav/wavread.cpp
   stfft.cpp
   feat.cpp
   beam_search.cpp
   input_processing.cpp
   rnnt_attrs.cpp
-  onnx_inference.cpp)
+  onnx_inference.cpp
+)
+
+set(CC_SRCS
+  ${SPM_SRCS}
+  pulse/pulse_rec.c
+)
+
+set_source_files_properties(${CXX_SRCS} PROPERTIES COMPILE_FLAGS "-std=c++17 -fno-permissive")
+
+add_compile_options(
+#  -DDEBUG_STFT
+#  -DDEBUG_FEAT
+#  -DDEBUG_WAV
+#  -DDEBUG_BUF
+  -DDEBUG_INF
+  -pthread #protobuf
+  -DHAVE_PTHREAD=1 #protobuf
+  -mfma #neon
+  -mavx2 #neon
+  -Wno-deprecated-declarations
+  -O3
+  -Wall
+  -fPIC
+  -Ofast
+  -march=znver3
+#  -march=native
+)
+
+add_executable( # Sets the name of the library.
+  onnxinfer
+  ${CC_SRCS}
+  ${CXX_SRCS}
+)
 
 set(ONNXRUNTIME_PATH ${CMAKE_CURRENT_SOURCE_DIR}/libonnxruntime.so)
 
@@ -133,4 +139,6 @@ target_link_libraries(
   PRIVATE
   ${ONNXRUNTIME_PATH}
   ${OpenMP_CXX_FLAGS}
+  pulse-simple
+  pulse
 )

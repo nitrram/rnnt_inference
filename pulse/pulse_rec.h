@@ -14,15 +14,25 @@
 
 #pragma once
 
-#include <cstdint>
-#include <cstddef>
+#include "common/buf_type.h"
 
-namespace spr::inference {
+#include <pulse/simple.h>
 
-  // returns feat_mat_size divided by number of the mel banks
-  size_t create_feat_inp(const int16_t*, size_t, float**);
+#define E_PULSE_REC_UNABLE_OPEN_DEVICE      -1
+#define E_PULSE_REC_UNABLE_WRITE_HW_PARAMS  -2
+#define E_PULSE_REC_SUCCESS                  0
 
-  // logs the input
-  size_t norm_inp(float*, size_t);
+static buf_t *_buffer = NULL;
+
+//#define PULSE_REC_SAMPLE_RATE 16000
+#define PULSE_REC_SAMPLE_RATE 16000
+
+#ifdef __cplusplus
+extern "C"{
+#endif
+
+  int start_recording(int (*callback)(buf_t *buf, size_t siz));
+
+#ifdef __cplusplus
 }
-//eof
+#endif
