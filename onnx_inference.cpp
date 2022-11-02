@@ -19,7 +19,10 @@
  * BPE ~ byte-pairs
  */
 
+#include "common/thr_queue.h"
 #include "common/buf_type.h"
+//#include "pulse/pulse_rec.h"
+#include "wav/wav_buf_simulator.h"
 #include "wav/wavread.h"
 
 #include "input_processing.h" // transforms wav stream into normalized features
@@ -37,7 +40,10 @@
 #include <functional>
 #include <iostream>
 #include <future>
+#include <queue>
+#include <mutex>
 #include <thread>
+#include <atomic>
 
 
 #define WAV_FILE "common_voice_cs_25695144_16.wav"
@@ -52,24 +58,34 @@
 #define EXPAND_BEAM 2.3f
 #define MELS FBANK_TP_ROW_SIZE
 
-
 enum INFERENCE_STATUS {
   E_OK = 0,
-  E_RNNT_ATTRS = -1,
-  E_WAV = -2
+  E_RNNT_ATTRS = -1
 };
 
-using buf_size_t = std::vector<buf_t>;
+enum REC_BUF_STATUS {
+  E_PREP = 0,
+  E_READY = 1,
+  E_DONE = 2
+};
 
-static void inference(spr::inference::rnnt_attrs *, const buf_size_t &, std::string *);
-static void dec_callback(const std::string &);
+struct locked_shared_buffer {
+	std::promise<void> signal_ready;
+	spr::inference::thr_queue data;
+	std::atomic_int pass;
+};
+
+static void inference(spr::inference::rnnt_attrs *,
+											spr::inference::beam_search &,
+											const spr::inference::buf_size_t &,
+											std::string *);
+
 static int rec_callback(buf_t *, size_t);
 
-static std::promise<buf_size_t> signal_buf_ready;
-static std::future<buf_size_t> process_rec_buffer;
+static std::promise<void> g_signal_exit;
+static std::future<void> g_stop_recording;
 
-static std::promise<void> signal_exit;
-static std::future<void> stop_recording;
+static locked_shared_buffer g_buf_ready;
 
 int _exitting = 0; // exitting handler for pulse
 
@@ -81,8 +97,8 @@ main(int argc,
   std::chrono::time_point<std::chrono::system_clock> start, end;
 #endif //DEBUG_INF
 
-  stop_recording = signal_exit.get_future();
-  process_rec_buffer = signal_buf_ready.get_future();
+  g_stop_recording = g_signal_exit.get_future();
+  g_buf_ready.pass = E_PREP;
 
   // load models and determine some intermediate values need for signal processing
   auto *rnnt_attrs = new spr::inference::rnnt_attrs(TN_FILE, PN_FILE, CN_FILE, BPE_MODEL, -1);
@@ -94,60 +110,79 @@ main(int argc,
   // producent
   std::thread([&]() {
     //TODO mod the code so the buffer is continuously read from pulse
-    
+
+    /*
+      if(start_recording(rec_callback) < 0) {
+      std::cerr << "Failure in starting pulse" << std::endl;
+      }
+    */
+
     auto *wav = new spr::wavread();
     if(argc == 2) {
       wav->init(argv[1]);
     } else {
       wav->init(WAV_FILE);
     }
-    
+
     if(!wav->prepare_to_read()) {
       std::cerr << "Could not read the WAV file." << std::endl;
 
       // making disebark possible + free resources
-      signal_exit.set_value();
+      g_signal_exit.set_value();
       wav->deallocate();
       delete wav;
     }
-    
+
     auto * wav_content = new buf_t[wav->get_num_samples()];
-    
+
     // create int16_t* buffer for features
     wav->read_data_to_int16(wav_content, wav->get_num_samples());
 
     // fill the global buffer
-    rec_callback(wav_content, wav->get_num_samples());
+    auto *wav_sim = new spr::wav_buf_simulator(wav_content, wav->get_num_samples(), rec_callback);
+    wav_sim->start_emitting();
+
+    delete wav_sim;
 
     // making disembark possible + free resources
-    signal_exit.set_value();
+    g_signal_exit.set_value();
     delete []wav_content;
     wav->deallocate();
     delete wav;
 
   }).detach();
-  
+
 #ifdef DEBUG_INF
   start = std::chrono::system_clock::now();
 #endif
 
   // consumer
   // run inference on a separate thread
-  std::string result;
+  std::string part_result;
+  std::ostringstream result;
 
   std::thread runner([&]() {
 
-    auto data = process_rec_buffer.get();
+		spr::inference::beam_search searcher(rnnt_attrs);
 
-    inference(rnnt_attrs, data, &result);
+		auto start_infering = g_buf_ready.signal_ready.get_future();
+		start_infering.wait();
+
+		int readyp;
+    while((readyp = g_buf_ready.pass.load()) != E_DONE || !g_buf_ready.data.empty()) {
+			//			std::cout << "take: " << g_buf_ready.data.size() << "(ready? " << readyp << ")";
+			inference(rnnt_attrs, searcher, g_buf_ready.data.pop(), &part_result);
+			//			std::cout << "take then: " << g_buf_ready.data.size() <<"(ready? " << readyp << ")\n";
+    }
+
+		result << part_result;
   });
-    //  std::thread runner(inference, rnnt_attrs, wav_content, wav->get_num_samples(), &result);
   runner.join();
 
 
   // stop detached recording
   _exitting = 1;
-  stop_recording.wait();
+  g_stop_recording.wait();
 
   // print the results
 #ifdef DEBUG_INF
@@ -155,7 +190,7 @@ main(int argc,
 #endif
 
   std::ostringstream  oss;
-  oss << "\r" << result;
+  oss << result.str();
 
 #ifdef DEBUG_INF
   oss << " (" <<
@@ -165,10 +200,14 @@ main(int argc,
 
   std::cout << oss.str() << std::endl;
 
-  return 0;
+  return E_OK;
 }
 
-void inference(spr::inference::rnnt_attrs *rnnt_attrs, const buf_size_t &buffer, std::string *result) {
+void inference(spr::inference::rnnt_attrs *rnnt_attrs,
+							 spr::inference::beam_search &searcher,
+							 const spr::inference::buf_size_t &buffer, std::string *result) {
+
+	//	std::cout << "[" << buffer.size() << "]\n";
 
   float *feat_inp = nullptr;
   size_t feats_num = spr::inference::create_feat_inp(buffer.data(), buffer.size(), &feat_inp);
@@ -177,26 +216,25 @@ void inference(spr::inference::rnnt_attrs *rnnt_attrs, const buf_size_t &buffer,
   // this is very important: you need to project the matrix size into the attributes
   rnnt_attrs->reset_buffer_win_len((int64_t)feats_num);
 
-
-  // result
-  spr::inference::beam_search searcher(rnnt_attrs);
-
-  auto dec_callback_fn = std::bind(dec_callback, std::placeholders::_1);
-
-  *result = searcher.decode(feat_inp, dec_callback_fn);
+  *result = searcher.decode(feat_inp);
 
   delete []feat_inp;
 }
 
-void dec_callback(const std::string &part_hyp) {
-  /// not implemented (yet)
-  std::cout << "\r" << part_hyp << std::flush;
-}
-
 int rec_callback(buf_t *data, size_t size) {
 
-  signal_buf_ready.set_value(std::vector<buf_t>(data, data+size));
-  
+  if(size) {
+		//		std::cout << "push: " << size << "(" << g_buf_ready.data.size() << ")\n";
+    g_buf_ready.data.push(std::vector<buf_t>(data, data+size));
+		if(g_buf_ready.pass.exchange(E_READY) == E_PREP) {
+			g_buf_ready.signal_ready.set_value();
+		}
+		//		std::cout << "push then: " << size << "(" << g_buf_ready.data.size() << ")\n";
+  } else {
+		//		std::cout << "push: DONE\n";
+    g_buf_ready.pass.store(E_DONE);
+  }
+
   return size;
 }
 //eof
