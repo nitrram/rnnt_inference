@@ -83,7 +83,9 @@ include_directories(${CMAKE_CURRENT_SOURCE_DIR}/ort)
 find_package(OpenMP REQUIRED)
 
 set(CXX_SRCS
+	wav/wav_buf_simulator.cpp
   wav/wavread.cpp
+	common/thr_queue.cpp
   stfft.cpp
   feat.cpp
   beam_search.cpp
@@ -114,8 +116,8 @@ add_compile_options(
   -Wall
   -fPIC
   -Ofast
-  -march=znver3
-#  -march=native
+#  -march=znver3
+  -march=native
 )
 
 add_executable( # Sets the name of the library.

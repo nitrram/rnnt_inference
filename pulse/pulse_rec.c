@@ -39,9 +39,10 @@ int start_recording(int (*callback)(buf_t *buf, size_t siz)) {
   int error;
 
   int size = 512 * sizeof(buf_t);
+	//int size = 4096 * sizeof(buf_t);
   int psize;
 
-  _buffer = (buf_t*)malloc(size);
+  buf_t * buffer = (buf_t*)malloc(size);
 
 
   /* Create the recording stream */
@@ -54,13 +55,13 @@ int start_recording(int (*callback)(buf_t *buf, size_t siz)) {
   while (!_exitting) {
 
     /* Record some data ... */
-    if ( (rc=pa_simple_read(s, _buffer, size, &error)) < 0) {
+    if ( (rc=pa_simple_read(s, buffer, size, &error)) < 0) {
       fprintf(stderr, __FILE__": pa_simple_read() failed: %s\n", pa_strerror(error));
       goto finish;
     }
 
     psize = size;
-    while( (psize -= callback(_buffer, size) ) > 0 ) {
+    while( (psize -= callback(buffer, size) ) > 0 ) {
       fprintf(stderr, "short write: wrote %d bytes\n", rc);
     }
   }
@@ -72,8 +73,8 @@ int start_recording(int (*callback)(buf_t *buf, size_t siz)) {
   if (s)
     pa_simple_free(s);
 
-  if(_buffer)
-    free(_buffer);
+  if(buffer)
+    free(buffer);
 
   return ret;
 }

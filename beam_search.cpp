@@ -33,19 +33,29 @@ namespace spr::inference {
   float beam_search::s_expand_beam = 2.3f;
 
   beam_search::beam_search(const spr::inference::rnnt_attrs *attrs) :
-    m_rnnt(attrs) {
+    m_rnnt(attrs),
+		m_embedding(m_rnnt->get_inp_sizes_pn().at(0)),
+    m_pn_state_buffer(m_rnnt->get_inp_sizes_pn().at(1)),
+		m_pre_alloc_sum_gelu(m_rnnt->get_inp_size_cn()),
+		m_beam_hyps({{ .prediction = {0}, .logp_score = .0f, .hidden_state = m_pn_state_buffer.data(), .hidden_state_present = false }}) {
+
+		// init embedding
+    for(size_t i=0; i<m_rnnt->get_inp_sizes_pn().at(0); m_embedding[i++]=0.0f);
+
+		// init pn state
+    for(size_t i=0; i<m_rnnt->get_inp_sizes_pn().at(1); m_pn_state_buffer[i++]=0.0f);
   }
 
-  std::string beam_search::decode(const float *input, std::function<void(std::string)> callback) const {
+  std::string beam_search::decode(const float *input) {
 
     std::string result;
     auto memory_info =
       Ort::MemoryInfo::CreateCpu(OrtArenaAllocator, OrtMemTypeDefault);
 
     auto inp_dims_tn = m_rnnt->get_inp_dims_tn();
-    auto input_tensor_tn = Ort::Value::CreateTensor<float>(
-                                                           memory_info , const_cast<float*>(input), m_rnnt->get_inp_size_tn(),
-                                                           inp_dims_tn.data(), inp_dims_tn.size());
+    auto input_tensor_tn =
+			Ort::Value::CreateTensor<float>(memory_info, const_cast<float*>(input), m_rnnt->get_inp_size_tn(),
+																			inp_dims_tn.data(), inp_dims_tn.size());
 
     // run transcription network upon the whole utterance
     auto output_tensors_tn =
@@ -56,17 +66,7 @@ namespace spr::inference {
 
     auto tn_shape = output_tensors_tn[0].GetTensorTypeAndShapeInfo().GetShape();
 
-    float embedding[m_rnnt->get_inp_sizes_pn().at(0)];
-    float pn_state_buffer[m_rnnt->get_inp_sizes_pn().at(1)];
-    float pre_alloc_sum_gelu[m_rnnt->get_inp_size_cn()];
-
-    // init embedding
-    for(size_t i=0; i<m_rnnt->get_inp_sizes_pn().at(0); embedding[i++]=0.0f);
-    // init pn state
-    for(size_t i=0; i<m_rnnt->get_inp_sizes_pn().at(1); pn_state_buffer[i++]=0.0f);
-
     std::vector<Ort::Value> input_tensors_pn;
-    spr::inference::vec_hyps beam_hyps = {{ .prediction = {0}, .logp_score = .0f, .hidden_state = pn_state_buffer, .hidden_state_present = false }};
     spr::inference::vec_hyps process_hyps;
 
     spr::inference::vec_hyps::const_iterator a_best_it, b_best_it;
@@ -75,12 +75,13 @@ namespace spr::inference {
       return left.logp_score / left.prediction.size() < right.logp_score / right.prediction.size(); };
 
     //e.g. 89x [1,1,512]
-    for(int step_t = 0; step_t < tn_shape.at(1); ++step_t) {
-      process_hyps = beam_hyps;
-      beam_hyps.clear();
+		int step_t;
+    for(step_t = 0; step_t < tn_shape.at(1); ++step_t) {
+      process_hyps = m_beam_hyps;
+      m_beam_hyps.clear();
 
       while (true) {
-        if (beam_hyps.size() >= s_beam_size) break;
+        if (m_beam_hyps.size() >= s_beam_size) break;
 
         a_best_it = std::max_element(process_hyps.cbegin(), process_hyps.cend(), best_fun);
 
@@ -91,8 +92,8 @@ namespace spr::inference {
 
         auto a_best_tok = *a_best_it;
 
-        if (!beam_hyps.empty()) {
-          b_best_it = std::max_element(beam_hyps.cbegin(), beam_hyps.cend(), best_fun);
+        if (!m_beam_hyps.empty()) {
+          b_best_it = std::max_element(m_beam_hyps.cbegin(), m_beam_hyps.cend(), best_fun);
           auto b_best_tok = *b_best_it;
 
           /*state_beam = 4.6*/
@@ -105,7 +106,6 @@ namespace spr::inference {
         // forward PN
         auto output_tensors_pn =
           predict(memory_info,
-                  embedding,
                   a_best_tok);
 
         // forward CN
@@ -113,8 +113,7 @@ namespace spr::inference {
           joint(memory_info,
                 output_tensors_tn[0].GetTensorData<float>() +
                 (step_t * m_rnnt->get_inp_size_cn()),
-                output_tensors_pn[0].GetTensorData<float>(),
-                pre_alloc_sum_gelu);
+                output_tensors_pn[0].GetTensorData<float>());
 
         // sum the joint probabilities to 1
         softmax(output_tensors_cn.at(0).GetTensorMutableData<float>(),
@@ -124,19 +123,18 @@ namespace spr::inference {
 
         auto top_log_probs =
           find_top_k_probs(log_probs_raw,
-                           output_tensors_cn.at(
-                                                0).GetTensorTypeAndShapeInfo().GetShape()[2]);
+                           output_tensors_cn.at(0).GetTensorTypeAndShapeInfo().GetShape()[2]);
 
         float best_logp = ((std::get<1>(top_log_probs.at(0)) != 0) ?
-                           std::get<0>(top_log_probs.at(0)) : std::get<0>(
-                                                                          top_log_probs.at(1)));
+                           std::get<0>(top_log_probs.at(0)) : std::get<0>(top_log_probs.at(1)));
+				
         for (const auto & top_log_prob : top_log_probs) {
 
           token_t top_hyp = {
             .prediction = a_best_tok.prediction,
             .logp_score = a_best_tok.logp_score +
             std::get<0>(top_log_prob),
-            .hidden_state = pn_state_buffer,
+            .hidden_state = m_pn_state_buffer.data(),
             .hidden_state_present = false
           };
 
@@ -149,7 +147,7 @@ namespace spr::inference {
               top_hyp.hidden_state_present = a_best_tok.hidden_state_present; //true
             }
 
-            beam_hyps.emplace_back(std::move(top_hyp));
+            m_beam_hyps.emplace_back(std::move(top_hyp));
 
             continue; //for( step_e )
           }
@@ -168,35 +166,39 @@ namespace spr::inference {
         } //for(int step_e = 0; step_e < top_log_probs.size(); ++step_e)
       } // while(true)
 
-      auto tmp_best_hyp = *std::max_element(beam_hyps.cbegin(), beam_hyps.cend(), best_fun);
-      // un-tokenize
-      auto tmp_particies = std::vector(tmp_best_hyp.prediction.cbegin() + 1, tmp_best_hyp.prediction.cend());
-      m_rnnt->get_sentencepiece_processor()->Decode(tmp_particies, &result);
-      callback(result);
-
+			//			std::cout << "[" << step_t << "] beam_hyps size: " << m_beam_hyps.size() << ", process_hyps size: " << process_hyps.size() << std::endl;
+			
     } //for(int step_t = 0; step_t < tn_shape[1]; ++step_t)
 
-    auto best_hyp = *std::max_element(beam_hyps.cbegin(), beam_hyps.cend(), best_fun);
+		//		std::cout << "[" << step_t << "] beam_hyps size: " << m_beam_hyps.size() << ", process_hyps size: " << process_hyps.size() << std::endl;
 
-    // un-tokenize
-    auto particies = std::vector(best_hyp.prediction.cbegin() + 1, best_hyp.prediction.cend());
+    auto best_token =
+			*std::max_element(m_beam_hyps.begin(),
+												m_beam_hyps.end(),
+												[](auto &left, auto &right) {
+													return left.logp_score / left.prediction.size() < right.logp_score / right.prediction.size(); });
+
+    // un-tokenize (w/o the first zero element)
+    auto particies = std::vector(best_token.prediction.cbegin() + 1,
+																 best_token.prediction.cend());
+		
     m_rnnt->get_sentencepiece_processor()->Decode(particies, &result);
 
     return result;
   }
 
   std::vector<Ort::Value> beam_search::predict(const Ort::MemoryInfo &memory_info,
-                                               float *pre_alloc_embedding,
-                                               const token_t &best_hyp) const {
+                                               const token_t &best_hyp) {
     // create one hot vector for the prediction
     ssize_t bpe_idx = !best_hyp.prediction.empty() ? best_hyp.prediction.back() : -1;
-    if(bpe_idx > 0) // && (size_t)bpe_idx <= target_sizes_pn.at(0))
-      pre_alloc_embedding[ bpe_idx -1 ] = 1.0f;
+    if(bpe_idx > 0) {
+			m_embedding[ bpe_idx - 1 ] = 1.0f;
+		}
 
 
     std::vector<Ort::Value> input_tensors_pn;
     input_tensors_pn.push_back(
-                               Ort::Value::CreateTensor<float>(memory_info, pre_alloc_embedding,
+                               Ort::Value::CreateTensor<float>(memory_info, m_embedding.data(),
                                                                m_rnnt->get_inp_sizes_pn().at(0),
                                                                m_rnnt->get_inp_dims_pn().at(0).data(),
                                                                m_rnnt->get_inp_dims_pn().at(0).size())
@@ -217,8 +219,8 @@ namespace spr::inference {
                                     m_rnnt->get_out_names_pn().size());
 
     //reset embedding
-    if(bpe_idx > 0) {// && (size_t)bpe_idx <= target_sizes_pn.at(0)) {
-      pre_alloc_embedding[ bpe_idx - 1 ] = 0.0f;
+    if(bpe_idx > 0) {
+			m_embedding[ bpe_idx - 1] = 0.0f;
     }
 
     return output_tensors_pn;
@@ -226,13 +228,12 @@ namespace spr::inference {
 
   std::vector<Ort::Value> beam_search::joint(const Ort::MemoryInfo &memory_info,
                                              const float *tn_data,
-                                             const float *pn_data,
-                                             float *pre_alloc_sum_gelu) const {
+                                             const float *pn_data) {
     float sum;
 
     // lin_input = gelu(logp)
 #ifdef ORR_OMP
-#pragma omp parallel for num_threads(THREADSIZE) default(none) private(sum) shared(tn_data, pn_data, pre_alloc_sum_gelu)
+#pragma omp parallel for num_threads(THREADSIZE) default(none) private(sum) shared(tn_data, pn_data, m_pre_alloc_sum_gelu)
 #endif
     for(size_t i=0; i<m_rnnt->get_inp_size_cn(); ++i) {
 
@@ -240,11 +241,12 @@ namespace spr::inference {
       sum = tn_data[i] + pn_data[i];
 
       // lin_input
-      pre_alloc_sum_gelu[i] = 0.5f * sum * (1.0f + std::tanh(std::sqrt(2.0f / M_PI) *
-                                                             (sum + 0.044715f * std::pow(sum, 3.0f))));
+      m_pre_alloc_sum_gelu[i] = 0.5f * sum * (1.0f +
+																							std::tanh(std::sqrt(2.0f / M_PI) *
+																												(sum + 0.044715f * std::pow(sum, 3.0f))));
     }
 
-    Ort::Value joint_in = Ort::Value::CreateTensor<float>(memory_info, pre_alloc_sum_gelu,
+    Ort::Value joint_in = Ort::Value::CreateTensor<float>(memory_info, m_pre_alloc_sum_gelu.data(),
                                                           m_rnnt->get_inp_size_cn(),
                                                           m_rnnt->get_inp_dims_cn().data(),
                                                           m_rnnt->get_inp_dims_cn().size());

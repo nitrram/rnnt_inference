@@ -191,9 +191,9 @@ namespace spr::inference {
 
 
       m_last_input_buffer_len = input_buffer_win_len;
-    } else {
+    } /*else {
       std::cerr << "Reseting buffer length with no effect.\n";
-    }
+			} */
   }
 }
 //eof

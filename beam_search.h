@@ -28,29 +28,35 @@
 
 namespace spr::inference {
 
-    class beam_search {
-    public:
-        beam_search(const rnnt_attrs *attrs);
+  class beam_search {
+  public:
+    beam_search(const rnnt_attrs *attrs);
 
-        std::string decode(const float*, std::function<void(std::string)>) const;
+    std::string decode(const float*);
 
-        virtual ~beam_search() = default;
+    virtual ~beam_search() = default;
 
-    private:
+  private:
 
-        std::vector<Ort::Value> predict(const Ort::MemoryInfo&, float *, const token_t&) const;
+    std::vector<Ort::Value> predict(const Ort::MemoryInfo&, const token_t&);
 
-        std::vector<Ort::Value> joint(const Ort::MemoryInfo&, const float *, const float *,
-                                      float *) const;
+    std::vector<Ort::Value> joint(const Ort::MemoryInfo&, const float *, const float *);
 
-        static vec_top_prob_t find_top_k_probs(const float *inp, size_t size);
+    static vec_top_prob_t find_top_k_probs(const float *inp, size_t size);
 
-    private:
-        const rnnt_attrs *m_rnnt;
+  private:
+    const rnnt_attrs *m_rnnt;
 
-        static size_t s_beam_size;
-        static float s_state_beam;
-        static float s_expand_beam;
-    };
+		std::vector<float> m_embedding;
+    std::vector<float> m_pn_state_buffer;
+    std::vector<float> m_pre_alloc_sum_gelu;
+		
+		//		token_t m_last_best_token;
+		spr::inference::vec_hyps m_beam_hyps;
+
+    static size_t s_beam_size;
+    static float s_state_beam;
+    static float s_expand_beam;
+  };
 }
 //eof

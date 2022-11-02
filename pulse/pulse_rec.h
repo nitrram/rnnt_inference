@@ -22,8 +22,6 @@
 #define E_PULSE_REC_UNABLE_WRITE_HW_PARAMS  -2
 #define E_PULSE_REC_SUCCESS                  0
 
-static buf_t *_buffer = NULL;
-
 //#define PULSE_REC_SAMPLE_RATE 16000
 #define PULSE_REC_SAMPLE_RATE 16000
 
