@@ -49,7 +49,14 @@
 #define WAV_FILE "common_voice_cs_25695144_16.wav"
 
 #define BPE_MODEL "80_bpe.model"
+
+#ifdef DEBUG_INF
 #define TN_FILE "rnnt_tn.ort"
+#endif
+
+#define TN_CNN_FILE "rnnt_tn_cnn.ort"
+#define TN_LSTM_FILE "rnnt_tn_lstm.ort"
+#define TN_DNN_FILE "rnnt_tn_dnn.ort"
 #define PN_FILE "rnnt_pn.ort"
 #define CN_FILE "rnnt_cn.ort"
 
@@ -70,15 +77,15 @@ enum REC_BUF_STATUS {
 };
 
 struct locked_shared_buffer {
-	std::promise<void> signal_ready;
-	spr::inference::thr_queue data;
-	std::atomic_int pass;
+  std::promise<void> signal_ready;
+  spr::inference::thr_queue data;
+  std::atomic_int pass;
 };
 
 static void inference(spr::inference::rnnt_attrs *,
-											spr::inference::beam_search &,
-											const spr::inference::buf_size_t &,
-											std::string *);
+                      spr::inference::beam_search &,
+                      const spr::inference::buf_size_t &,
+                      std::string *);
 
 static int rec_callback(buf_t *, size_t);
 
@@ -101,7 +108,11 @@ main(int argc,
   g_buf_ready.pass = E_PREP;
 
   // load models and determine some intermediate values need for signal processing
-  auto *rnnt_attrs = new spr::inference::rnnt_attrs(TN_FILE, PN_FILE, CN_FILE, BPE_MODEL, -1);
+  auto *rnnt_attrs = new spr::inference::rnnt_attrs(
+#ifdef DEBUG_INF
+                                                    TN_FILE,
+#endif
+                                                    TN_CNN_FILE, TN_LSTM_FILE, TN_DNN_FILE, PN_FILE, CN_FILE, BPE_MODEL, -1);
   if(!rnnt_attrs->is_initialized()) {
     std::cerr << "Could not read any of RNN-T models." << std::endl;
     return E_RNNT_ATTRS;
@@ -163,19 +174,17 @@ main(int argc,
 
   std::thread runner([&]() {
 
-		spr::inference::beam_search searcher(rnnt_attrs);
+    spr::inference::beam_search searcher(rnnt_attrs);
 
-		auto start_infering = g_buf_ready.signal_ready.get_future();
-		start_infering.wait();
+    auto start_infering = g_buf_ready.signal_ready.get_future();
+    start_infering.wait();
 
-		int readyp;
+    int readyp;
     while((readyp = g_buf_ready.pass.load()) != E_DONE || !g_buf_ready.data.empty()) {
-			//			std::cout << "take: " << g_buf_ready.data.size() << "(ready? " << readyp << ")";
-			inference(rnnt_attrs, searcher, g_buf_ready.data.pop(), &part_result);
-			//			std::cout << "take then: " << g_buf_ready.data.size() <<"(ready? " << readyp << ")\n";
+      inference(rnnt_attrs, searcher, g_buf_ready.data.pop(), &part_result);
     }
 
-		result << part_result;
+    result << part_result;
   });
   runner.join();
 
@@ -204,10 +213,10 @@ main(int argc,
 }
 
 void inference(spr::inference::rnnt_attrs *rnnt_attrs,
-							 spr::inference::beam_search &searcher,
-							 const spr::inference::buf_size_t &buffer, std::string *result) {
+               spr::inference::beam_search &searcher,
+               const spr::inference::buf_size_t &buffer, std::string *result) {
 
-	//	std::cout << "[" << buffer.size() << "]\n";
+  //  std::cout << "[" << buffer.size() << "]\n";
 
   float *feat_inp = nullptr;
   size_t feats_num = spr::inference::create_feat_inp(buffer.data(), buffer.size(), &feat_inp);
@@ -224,14 +233,14 @@ void inference(spr::inference::rnnt_attrs *rnnt_attrs,
 int rec_callback(buf_t *data, size_t size) {
 
   if(size) {
-		//		std::cout << "push: " << size << "(" << g_buf_ready.data.size() << ")\n";
+    //    std::cout << "push: " << size << "(" << g_buf_ready.data.size() << ")\n";
     g_buf_ready.data.push(std::vector<buf_t>(data, data+size));
-		if(g_buf_ready.pass.exchange(E_READY) == E_PREP) {
-			g_buf_ready.signal_ready.set_value();
-		}
-		//		std::cout << "push then: " << size << "(" << g_buf_ready.data.size() << ")\n";
+    if(g_buf_ready.pass.exchange(E_READY) == E_PREP) {
+      g_buf_ready.signal_ready.set_value();
+    }
+    //    std::cout << "push then: " << size << "(" << g_buf_ready.data.size() << ")\n";
   } else {
-		//		std::cout << "push: DONE\n";
+    //    std::cout << "push: DONE\n";
     g_buf_ready.pass.store(E_DONE);
   }
 

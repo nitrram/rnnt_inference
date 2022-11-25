@@ -19,7 +19,13 @@
 
 namespace spr::inference {
 
-  rnnt_attrs::rnnt_attrs(const std::string &model_tn_path,
+  rnnt_attrs::rnnt_attrs(
+#ifdef DEBUG_INF
+                         const std::string &model_tn_path,
+#endif
+                         const std::string &model_tn_cnn_path,
+                         const std::string &model_tn_lstm_path,
+                         const std::string &model_tn_dnn_path,
                          const std::string &model_pn_path,
                          const std::string &model_cn_path,
                          const std::string &model_sp_path,
@@ -27,10 +33,21 @@ namespace spr::inference {
     m_ort_env(nullptr),
     m_is_initialized(false) {
 
-    init(model_tn_path, model_pn_path, model_cn_path, model_sp_path, input_buffer_win_len);
+    init(
+#ifdef DEBUG_INF
+         model_tn_path,
+#endif
+         model_tn_cnn_path, model_tn_lstm_path, model_tn_dnn_path, model_pn_path,
+         model_cn_path, model_sp_path, input_buffer_win_len);
   }
 
-  void rnnt_attrs::init(const std::string &model_tn_path,
+  void rnnt_attrs::init(
+#ifdef DEBUG_INF
+                        const std::string &model_tn_path,
+#endif
+                        const std::string &model_tn_cnn_path,
+                        const std::string &model_tn_lstm_path,
+                        const std::string &model_tn_dnn_path,
                         const std::string &model_pn_path,
                         const std::string &model_cn_path,
                         const std::string &model_sp_path,
@@ -44,7 +61,13 @@ namespace spr::inference {
 
     Ort::ThrowOnError(OrtSessionOptionsAppendExecutionProvider_CPU(so, (int)exec_flags));
     //Ort::ThrowOnError(OrtSessionOptionsAppendExecutionProvider_CUDA(so, (int)exec_flags));
+
+#ifdef DEBUG_INF
     m_session_tn = create_session(m_ort_env, so, model_tn_path, input_buffer_win_len);
+#endif
+    m_session_tn_cnn = create_session(m_ort_env, so, model_tn_cnn_path, input_buffer_win_len);
+    m_session_tn_lstm = create_session(m_ort_env, so, model_tn_lstm_path, input_buffer_win_len);
+    m_session_tn_dnn = create_session(m_ort_env, so, model_tn_dnn_path, input_buffer_win_len);
     m_session_pn = create_session(m_ort_env, so, model_pn_path, input_buffer_win_len);
     m_session_cn = create_session(m_ort_env, so, model_cn_path, input_buffer_win_len);
 
@@ -112,88 +135,71 @@ namespace spr::inference {
   rnnt_attrs::~rnnt_attrs() {
     delete m_sp_processor;
 
+    auto del_nodes = [](auto  &session_attr) {
+      
+      for(const char *node_name : session_attr.inp_node_names)
+        session_attr.allocator.Free(const_cast<void*>(reinterpret_cast<const void*>(node_name)));
+      for(const char *node_name : session_attr.out_node_names)
+        session_attr.allocator.Free(const_cast<void*>(reinterpret_cast<const void*>(node_name)));
+
+      delete session_attr.session;
+    };
+
     // release buffers allocated by ORT alloctor
-    for(const char *node_name : m_session_tn.inp_node_names)
-      m_session_tn.allocator.Free(const_cast<void*>(reinterpret_cast<const void*>(node_name)));
+#ifdef DEBUG_INF
+    del_nodes(m_session_tn);
+#endif
 
-    for(const char *node_name : m_session_tn.out_node_names)
-      m_session_tn.allocator.Free(const_cast<void*>(reinterpret_cast<const void*>(node_name)));
+    del_nodes(m_session_tn_cnn);
+    del_nodes(m_session_tn_lstm);
+    del_nodes(m_session_tn_dnn);
+    del_nodes(m_session_pn);
+    del_nodes(m_session_cn);
 
-    for(const char *node_name : m_session_pn.inp_node_names)
-      m_session_pn.allocator.Free(const_cast<void*>(reinterpret_cast<const void*>(node_name)));
-
-    for(const char *node_name : m_session_pn.out_node_names)
-      m_session_pn.allocator.Free(const_cast<void*>(reinterpret_cast<const void*>(node_name)));
-
-    for(const char *node_name : m_session_cn.inp_node_names)
-      m_session_cn.allocator.Free(const_cast<void*>(reinterpret_cast<const void*>(node_name)));
-
-    for(const char *node_name : m_session_cn.out_node_names)
-      m_session_cn.allocator.Free(const_cast<void*>(reinterpret_cast<const void*>(node_name)));
-
-    delete m_session_tn.session;
-    delete m_session_pn.session;
-    delete m_session_cn.session;
     delete m_ort_env;
   }
 
-  void rnnt_attrs::reset_buffer_win_len(int64_t input_buffer_win_len) {
+  void rnnt_attrs::reset_buffer_win_len(int64_t variable_input_len) {
 
-    if(m_last_input_buffer_len != input_buffer_win_len) {
+    if(m_last_input_buffer_len != variable_input_len) {
 
-      // TN
-      auto *session = m_session_tn.session;
-      for(size_t i=0; i< session->GetInputCount(); ++i) {
+      // TN_CNN
+      fetch_session_input_params(m_session_tn_cnn, variable_input_len);
+ 
+      // TN_LSTM
+      fetch_session_input_params(m_session_tn_lstm, variable_input_len);
 
-        auto type_info = session->GetInputTypeInfo(i);
-        auto tensor_info = type_info.GetTensorTypeAndShapeInfo();
-        m_session_tn.inp_node_dims[i] = tensor_info.GetShape();
-
-        m_session_tn.inp_sizes[i] = 1L;
-
-        for(size_t j=0; j<m_session_tn.inp_node_dims[i].size(); ++j) {
-          if(m_session_tn.inp_node_dims[i][j] < 1) m_session_tn.inp_node_dims[i][j] = input_buffer_win_len;
-          m_session_tn.inp_sizes[i] *= m_session_tn.inp_node_dims[i][j];
-        }
-      }
+      // TN_DNN
+      fetch_session_input_params(m_session_tn_dnn, variable_input_len);
 
       // PN
-      session = m_session_pn.session;
-      for(size_t i=0; i< session->GetInputCount(); ++i) {
-
-        auto type_info = session->GetInputTypeInfo(i);
-        auto tensor_info = type_info.GetTensorTypeAndShapeInfo();
-        m_session_pn.inp_node_dims[i] = tensor_info.GetShape();
-
-        m_session_pn.inp_sizes[i] = 1L;
-
-        for(size_t j=0; j<m_session_pn.inp_node_dims[i].size(); ++j) {
-          if(m_session_pn.inp_node_dims[i][j] < 1) m_session_pn.inp_node_dims[i][j] = input_buffer_win_len;
-          m_session_pn.inp_sizes[i] *= m_session_pn.inp_node_dims[i][j];
-        }
-      }
+      fetch_session_input_params(m_session_pn, variable_input_len);
 
       // CN
-      session = m_session_cn.session;
-      for(size_t i=0; i< session->GetInputCount(); ++i) {
+      fetch_session_input_params(m_session_cn, variable_input_len);
 
-        auto type_info = session->GetInputTypeInfo(i);
-        auto tensor_info = type_info.GetTensorTypeAndShapeInfo();
-        m_session_cn.inp_node_dims[i] = tensor_info.GetShape();
-
-        m_session_cn.inp_sizes[i] = 1L;
-
-        for(size_t j=0; j<m_session_cn.inp_node_dims[i].size(); ++j) {
-          if(m_session_cn.inp_node_dims[i][j] < 1) m_session_cn.inp_node_dims[i][j] = input_buffer_win_len;
-          m_session_cn.inp_sizes[i] *= m_session_cn.inp_node_dims[i][j];
-        }
-      }
-
-
-      m_last_input_buffer_len = input_buffer_win_len;
+      m_last_input_buffer_len = variable_input_len;
     } /*else {
       std::cerr << "Reseting buffer length with no effect.\n";
-			} */
+      } */
+  }
+
+
+  void rnnt_attrs::fetch_session_input_params(s_attr &session_attr, int64_t variable_input_len) {
+    auto *session = session_attr.session;
+    for(size_t i=0; i< session->GetInputCount(); ++i) {
+      
+      auto type_info = session->GetInputTypeInfo(i);
+      auto tensor_info = type_info.GetTensorTypeAndShapeInfo();
+      session_attr.inp_node_dims[i] = tensor_info.GetShape();
+      
+      session_attr.inp_sizes[i] = 1L;
+      
+      for(size_t j=0; j < session_attr.inp_node_dims[i].size(); ++j) {
+        if(session_attr.inp_node_dims[i][j] < 1) session_attr.inp_node_dims[i][j] = variable_input_len;
+        session_attr.inp_sizes[i] *= session_attr.inp_node_dims[i][j];
+      }
+    }
   }
 }
 //eof

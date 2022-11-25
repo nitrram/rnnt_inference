@@ -25,6 +25,10 @@
 #include <vector>
 #include <cstdint>
 
+#ifdef DEBUG_ORT
+#include <iostream>
+#endif
+
 #include "model_structs.h"
 
 
@@ -38,14 +42,26 @@ namespace spr::inference {
     std::vector<size_t> inp_sizes;
     vec_node_names_t inp_node_names, out_node_names;
     vec_dims_size_t inp_node_dims, out_node_dims;
+
+
   };
 
   class rnnt_attrs {
   public:
 
-    rnnt_attrs(const std::string &, const std::string &, const std::string &,
-               const std::string &, int64_t);
+    rnnt_attrs(
+#ifdef DEBUG_INF
+       const std::string &,
+#endif
+       const std::string &,
+       const std::string &,
+       const std::string &,
+       const std::string &,
+       const std::string &,
+       const std::string &,
+       int64_t);
 
+ 
     virtual ~rnnt_attrs();
 
     void reset_buffer_win_len(int64_t);
@@ -55,17 +71,23 @@ namespace spr::inference {
     inline sp::SentencePieceProcessor *get_sentencepiece_processor() const {
       return m_sp_processor;
     }
-
+#ifdef DEBUG_INF
     inline Ort::Session *get_session_tn() const { return m_session_tn.session; }
+#endif
+
+    inline Ort::Session *get_session_tn_cnn() const { return m_session_tn_cnn.session; }
+    inline Ort::Session *get_session_tn_lstm() const { return m_session_tn_lstm.session; }
+    inline Ort::Session *get_session_tn_dnn() const { return m_session_tn_dnn.session; }
     inline Ort::Session *get_session_pn() const { return m_session_pn.session; }
     inline Ort::Session *get_session_cn() const { return m_session_cn.session; }
 
+#ifdef DEBUG_INF
     inline size_t get_inp_size_tn() const {
       return m_session_tn.inp_sizes.at(0);
     }
 
     inline const dims_size_t &get_inp_dims_tn() const {
-      return m_session_tn.inp_node_dims.at(0);
+      return m_session_tn.inp_node_dims.at(0); 
     }
 
     inline const vec_node_names_t &get_inp_names_tn() const {
@@ -74,6 +96,55 @@ namespace spr::inference {
 
     inline const vec_node_names_t &get_out_names_tn() const {
       return m_session_tn.out_node_names;
+    }
+#endif
+
+    inline size_t get_inp_size_tn_cnn() const {
+      return m_session_tn_cnn.inp_sizes.at(0);
+    }
+
+    inline const dims_size_t &get_inp_dims_tn_cnn() const {
+      return m_session_tn_cnn.inp_node_dims.at(0);
+    }
+
+    inline const vec_node_names_t &get_inp_names_tn_cnn() const {
+      return m_session_tn_cnn.inp_node_names;
+    }
+
+    inline const vec_node_names_t &get_out_names_tn_cnn() const {
+      return m_session_tn_cnn.out_node_names;
+    }
+
+    inline const std::vector<size_t> &get_inp_size_tn_lstm() const {
+      return m_session_tn_lstm.inp_sizes;
+    }
+
+    inline const vec_dims_size_t &get_inp_dims_tn_lstm() const {
+      return m_session_tn_lstm.inp_node_dims;
+    }
+
+    inline const vec_node_names_t &get_inp_names_tn_lstm() const {
+      return m_session_tn_lstm.inp_node_names;
+    }
+
+    inline const vec_node_names_t &get_out_names_tn_lstm() const {
+      return m_session_tn_lstm.out_node_names;
+    }
+
+    inline size_t get_inp_size_tn_dnn() const {
+      return m_session_tn_dnn.inp_sizes.at(0);
+    }
+    
+    inline const dims_size_t &get_inp_dims_tn_dnn() const {
+      return m_session_tn_dnn.inp_node_dims.at(0);
+    }
+
+    inline const vec_node_names_t &get_inp_names_tn_dnn() const {
+      return m_session_tn_dnn.inp_node_names;
+    }
+
+    inline const vec_node_names_t &get_out_names_tn_dnn() const {
+      return m_session_tn_dnn.out_node_names;
     }
 
     inline const std::vector<size_t> &get_inp_sizes_pn() const {
@@ -113,12 +184,112 @@ namespace spr::inference {
     static s_attr create_session(Ort::Env *, const Ort::SessionOptions&,
                                  const std::string &, int64_t);
 
-    void init(const std::string &, const std::string &, const std::string &,
-              const std::string &, int64_t);
+    static void fetch_session_input_params(s_attr &, int64_t);
+
+    void init(
+#ifdef DEBUG_INF
+       const std::string &,
+#endif
+       const std::string &,
+       const std::string &,
+       const std::string &,
+       const std::string &,
+       const std::string &,
+       const std::string &,
+       int64_t);
+
+
+#ifdef DEBUG_ORT
+    inline void print(std::string &&tag, const s_attr &session_attr) const {
+      std::cout << tag << ": (input: \n\t";
+      size_t i;
+      size_t j;
+      for(i=0;i<session_attr.inp_node_names.size()-1;++i) {
+        std::cout << session_attr.inp_node_names.at(i) << ", ";
+      }
+      std::cout << session_attr.inp_node_names.at(i) << ") ";
+
+      std::cout << "[";
+      for(i=0; i < session_attr.inp_node_dims.size() - 1; ++i) {
+      
+        std::cout << "[";
+        for(j=0; j<session_attr.inp_node_dims.at(i).size() - 1; ++j) {
+          std::cout << session_attr.inp_node_dims.at(i).at(j) << ", ";
+        }
+        std::cout << session_attr.inp_node_dims.at(i).at(j) << "], ";
+      }
+
+      std::cout << "[";
+      for(j=0; j<session_attr.inp_node_dims.at(i).size() - 1; ++j) {
+        std::cout << session_attr.inp_node_dims.at(i).at(j) << ", ";
+      }
+      std::cout << session_attr.inp_node_dims.at(i).at(j) << "]]\n)\n";
+
+
+
+      std::cout << tag << ": (output: \n\t";
+      for(i=0;i<session_attr.out_node_names.size()-1;++i) {
+        std::cout << session_attr.out_node_names.at(i) << ", ";
+      }
+      std::cout << session_attr.out_node_names.at(i) << ") ";
+
+      std::cout << "[";
+      for(i=0; i < session_attr.out_node_dims.size() - 1; ++i) {
+      
+        std::cout << "[";
+        for(j=0; j<session_attr.out_node_dims.at(i).size() - 1; ++j) {
+          std::cout << session_attr.out_node_dims.at(i).at(j) << ", ";
+        }
+        std::cout << session_attr.out_node_dims.at(i).at(j) << "], ";
+      }
+
+      std::cout << "[";
+      for(j=0; j<session_attr.out_node_dims.at(i).size() - 1; ++j) {
+        std::cout << session_attr.out_node_dims.at(i).at(j) << ", ";
+      }
+      std::cout << session_attr.out_node_dims.at(i).at(j) << "]]\n)\n";
+
+
+      std::cout << std::endl;
+
+
+      /*
+      std::cout << "(output: \n\t";
+      for(i=0;i<session_attr.out_node_names.size()-1;++i) {
+        std::cout << session_attr.out_node_names.at(i) << ", ";
+      }
+      std::cout << session_attr.out_node_names.at(i) << ") ";
+      std::cout << "[";
+      for(i=0<session_attr.out_node_dims.size() - 1; ++i) {
+        std::cout << session_attr.out_node_dims.at(i) << ", ";
+      }
+      std::cout << session_attr.out_node_dims.at(i) << "])\n";
+      */
+    }
+  public:
+
+    inline void print_all() const {
+
+#ifdef DEBUG_INF
+      print("encoder", m_session_tn);
+#endif
+      
+      print("tn_cnn", m_session_tn_cnn);
+      print("tn_lstm", m_session_tn_lstm);
+      print("tn_dnn", m_session_tn_dnn);
+      print("pn", m_session_pn);
+      print("cn", m_session_cn);
+    }
+#endif
 
   private:
     Ort::Env *m_ort_env;
+#ifdef DEBUG_INF
     s_attr m_session_tn;
+#endif
+    s_attr m_session_tn_cnn;
+    s_attr m_session_tn_lstm;
+    s_attr m_session_tn_dnn;
     s_attr m_session_pn;
     s_attr m_session_cn;
 

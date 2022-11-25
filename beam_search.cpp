@@ -34,33 +34,46 @@ namespace spr::inference {
 
   beam_search::beam_search(const spr::inference::rnnt_attrs *attrs) :
     m_rnnt(attrs),
-		m_embedding(m_rnnt->get_inp_sizes_pn().at(0)),
+    m_embedding(m_rnnt->get_inp_sizes_pn().at(0)),
     m_pn_state_buffer(m_rnnt->get_inp_sizes_pn().at(1)),
-		m_pre_alloc_sum_gelu(m_rnnt->get_inp_size_cn()),
-		m_beam_hyps({{ .prediction = {0}, .logp_score = .0f, .hidden_state = m_pn_state_buffer.data(), .hidden_state_present = false }}) {
+    m_pre_alloc_sum_gelu(m_rnnt->get_inp_size_cn()),
+    m_beam_hyps({{ .prediction = {0}, .logp_score = .0f, .hidden_state = m_pn_state_buffer.data(), .hidden_state_present = false }}) {
 
-		// init embedding
+    // init embedding
     for(size_t i=0; i<m_rnnt->get_inp_sizes_pn().at(0); m_embedding[i++]=0.0f);
 
-		// init pn state
+    // init pn state
     for(size_t i=0; i<m_rnnt->get_inp_sizes_pn().at(1); m_pn_state_buffer[i++]=0.0f);
   }
 
   std::string beam_search::decode(const float *input) {
 
+
+
     std::string result;
     auto memory_info =
       Ort::MemoryInfo::CreateCpu(OrtArenaAllocator, OrtMemTypeDefault);
 
-    auto inp_dims_tn = m_rnnt->get_inp_dims_tn();
+    auto inp_dims_tn = m_rnnt->get_inp_dims_tn_cnn();
     auto input_tensor_tn =
-			Ort::Value::CreateTensor<float>(memory_info, const_cast<float*>(input), m_rnnt->get_inp_size_tn(),
-																			inp_dims_tn.data(), inp_dims_tn.size());
+      Ort::Value::CreateTensor<float>(memory_info, const_cast<float*>(input), m_rnnt->get_inp_size_tn_cnn(),
+                                      inp_dims_tn.data(), inp_dims_tn.size());
 
     // run transcription network upon the whole utterance
-    auto output_tensors_tn =
-      m_rnnt->get_session_tn()->Run(Ort::RunOptions{nullptr}, m_rnnt->get_inp_names_tn().data(),
-                                    &input_tensor_tn, 1, m_rnnt->get_out_names_tn().data(), 1);
+    auto output_tensors_tn_cnn = m_rnnt->get_session_tn_cnn()->Run(Ort::RunOptions{nullptr}, m_rnnt->get_inp_names_tn_cnn().data(),
+                                                                   &input_tensor_tn, 1, m_rnnt->get_out_names_tn_cnn().data(), m_rnnt->get_out_names_tn_cnn().size());
+
+    assert(output_tensors_tn_cnn.size() == 7);
+
+    auto output_tensors_tn_lstm = m_rnnt->get_session_tn_lstm()->Run(Ort::RunOptions{nullptr}, m_rnnt->get_inp_names_tn_lstm().data(),
+                                                                     output_tensors_tn_cnn.data(), output_tensors_tn_cnn.size(),
+                                                                     m_rnnt->get_out_names_tn_lstm().data(), m_rnnt->get_out_names_tn_lstm().size());
+
+    assert(output_tensors_tn_lstm.size() == 7);
+
+    auto output_tensors_tn = m_rnnt->get_session_tn_dnn()->Run(Ort::RunOptions{nullptr}, m_rnnt->get_inp_names_tn_dnn().data(),
+                                                               &output_tensors_tn_lstm[4], 1,
+                                                               m_rnnt->get_out_names_tn_dnn().data(), m_rnnt->get_out_names_tn_dnn().size());
 
     assert(output_tensors_tn.size() == 1);
 
@@ -75,7 +88,7 @@ namespace spr::inference {
       return left.logp_score / left.prediction.size() < right.logp_score / right.prediction.size(); };
 
     //e.g. 89x [1,1,512]
-		int step_t;
+    int step_t;
     for(step_t = 0; step_t < tn_shape.at(1); ++step_t) {
       process_hyps = m_beam_hyps;
       m_beam_hyps.clear();
@@ -127,7 +140,7 @@ namespace spr::inference {
 
         float best_logp = ((std::get<1>(top_log_probs.at(0)) != 0) ?
                            std::get<0>(top_log_probs.at(0)) : std::get<0>(top_log_probs.at(1)));
-				
+
         for (const auto & top_log_prob : top_log_probs) {
 
           token_t top_hyp = {
@@ -166,22 +179,22 @@ namespace spr::inference {
         } //for(int step_e = 0; step_e < top_log_probs.size(); ++step_e)
       } // while(true)
 
-			//			std::cout << "[" << step_t << "] beam_hyps size: " << m_beam_hyps.size() << ", process_hyps size: " << process_hyps.size() << std::endl;
-			
+      //      std::cout << "[" << step_t << "] beam_hyps size: " << m_beam_hyps.size() << ", process_hyps size: " << process_hyps.size() << std::endl;
+
     } //for(int step_t = 0; step_t < tn_shape[1]; ++step_t)
 
-		//		std::cout << "[" << step_t << "] beam_hyps size: " << m_beam_hyps.size() << ", process_hyps size: " << process_hyps.size() << std::endl;
+    //    std::cout << "[" << step_t << "] beam_hyps size: " << m_beam_hyps.size() << ", process_hyps size: " << process_hyps.size() << std::endl;
 
     auto best_token =
-			*std::max_element(m_beam_hyps.begin(),
-												m_beam_hyps.end(),
-												[](auto &left, auto &right) {
-													return left.logp_score / left.prediction.size() < right.logp_score / right.prediction.size(); });
+      *std::max_element(m_beam_hyps.begin(),
+                        m_beam_hyps.end(),
+                        [](auto &left, auto &right) {
+                          return left.logp_score / left.prediction.size() < right.logp_score / right.prediction.size(); });
 
     // un-tokenize (w/o the first zero element)
     auto particies = std::vector(best_token.prediction.cbegin() + 1,
-																 best_token.prediction.cend());
-		
+                                 best_token.prediction.cend());
+
     m_rnnt->get_sentencepiece_processor()->Decode(particies, &result);
 
     return result;
@@ -192,8 +205,8 @@ namespace spr::inference {
     // create one hot vector for the prediction
     ssize_t bpe_idx = !best_hyp.prediction.empty() ? best_hyp.prediction.back() : -1;
     if(bpe_idx > 0) {
-			m_embedding[ bpe_idx - 1 ] = 1.0f;
-		}
+      m_embedding[ bpe_idx - 1 ] = 1.0f;
+    }
 
 
     std::vector<Ort::Value> input_tensors_pn;
@@ -220,7 +233,7 @@ namespace spr::inference {
 
     //reset embedding
     if(bpe_idx > 0) {
-			m_embedding[ bpe_idx - 1] = 0.0f;
+      m_embedding[ bpe_idx - 1] = 0.0f;
     }
 
     return output_tensors_pn;
@@ -242,8 +255,8 @@ namespace spr::inference {
 
       // lin_input
       m_pre_alloc_sum_gelu[i] = 0.5f * sum * (1.0f +
-																							std::tanh(std::sqrt(2.0f / M_PI) *
-																												(sum + 0.044715f * std::pow(sum, 3.0f))));
+                                              std::tanh(std::sqrt(2.0f / M_PI) *
+                                                        (sum + 0.044715f * std::pow(sum, 3.0f))));
     }
 
     Ort::Value joint_in = Ort::Value::CreateTensor<float>(memory_info, m_pre_alloc_sum_gelu.data(),
