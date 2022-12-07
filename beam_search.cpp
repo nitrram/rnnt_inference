@@ -12,19 +12,19 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.!
 
-#include "beam_search.h"
 #include "common/softmax_neon.h"
 #include "common/copy_neon.h"
-
-// Onnx headers
-#include <cpu_provider_factory.h>
+#include "beam_search.h"
 
 // Sentencepiece headers
 #include <sentencepiece_processor.h>
 
+// Onnx headers
+#include <cpu_provider_factory.h>
+
 #include <iostream>
-#include <cmath>
 #include <cassert>
+#include <cmath>
 
 namespace spr::inference {
 
@@ -48,9 +48,6 @@ namespace spr::inference {
 
   std::string beam_search::decode(const float *input) {
 
-
-
-    std::string result;
     auto memory_info =
       Ort::MemoryInfo::CreateCpu(OrtArenaAllocator, OrtMemTypeDefault);
 
@@ -65,19 +62,47 @@ namespace spr::inference {
 
     assert(output_tensors_tn_cnn.size() == 7);
 
-    auto output_tensors_tn_lstm = m_rnnt->get_session_tn_lstm()->Run(Ort::RunOptions{nullptr}, m_rnnt->get_inp_names_tn_lstm().data(),
+    // if it is not the first segment, use recalling LSTM state
+    if(!m_lstm_state.empty()) {
+
+      std::cout << "reset lstm weight\n";
+      auto lstm_h_size = m_rnnt->get_inp_sizes_tn_lstm().at(1);
+      auto lstm_c_size = m_rnnt->get_inp_sizes_tn_lstm().at(2);
+      auto lstm_h_dims = m_rnnt->get_inp_dims_tn_lstm().at(1);
+      auto lstm_c_dims = m_rnnt->get_inp_dims_tn_lstm().at(2);
+      output_tensors_tn_cnn[1] = Ort::Value::CreateTensor<float>(memory_info, const_cast<float*>(m_lstm_state.at(0).GetTensorData<float>()), lstm_h_size, lstm_h_dims.data(), lstm_h_dims.size());
+      output_tensors_tn_cnn[2] = Ort::Value::CreateTensor<float>(memory_info, const_cast<float*>(m_lstm_state.at(1).GetTensorData<float>()), lstm_c_size, lstm_c_dims.data(), lstm_c_dims.size());
+
+      lstm_h_size = m_rnnt->get_inp_sizes_tn_lstm()[3];
+      lstm_c_size = m_rnnt->get_inp_sizes_tn_lstm()[4];
+      lstm_h_dims = m_rnnt->get_inp_dims_tn_lstm()[3];
+      lstm_c_dims = m_rnnt->get_inp_dims_tn_lstm()[4];
+      output_tensors_tn_cnn[3] = Ort::Value::CreateTensor<float>(memory_info, const_cast<float*>(m_lstm_state.at(2).GetTensorData<float>()), lstm_h_size, lstm_h_dims.data(), lstm_h_dims.size());
+      output_tensors_tn_cnn[4] = Ort::Value::CreateTensor<float>(memory_info, const_cast<float*>(m_lstm_state.at(3).GetTensorData<float>()), lstm_c_size, lstm_c_dims.data(), lstm_c_dims.size());
+
+      lstm_h_size = m_rnnt->get_inp_sizes_tn_lstm()[5];
+      lstm_c_size = m_rnnt->get_inp_sizes_tn_lstm()[6];
+      lstm_h_dims = m_rnnt->get_inp_dims_tn_lstm()[5];
+      lstm_c_dims = m_rnnt->get_inp_dims_tn_lstm()[6];
+      output_tensors_tn_cnn[5] = Ort::Value::CreateTensor<float>(memory_info, const_cast<float*>(m_lstm_state.at(5).GetTensorData<float>()), lstm_h_size, lstm_h_dims.data(), lstm_h_dims.size());
+      output_tensors_tn_cnn[6] = Ort::Value::CreateTensor<float>(memory_info, const_cast<float*>(m_lstm_state.at(6).GetTensorData<float>()), lstm_c_size, lstm_c_dims.data(), lstm_c_dims.size());
+    }
+
+    // LSTM part inference
+    m_lstm_state = m_rnnt->get_session_tn_lstm()->Run(Ort::RunOptions{nullptr}, m_rnnt->get_inp_names_tn_lstm().data(),
                                                                      output_tensors_tn_cnn.data(), output_tensors_tn_cnn.size(),
                                                                      m_rnnt->get_out_names_tn_lstm().data(), m_rnnt->get_out_names_tn_lstm().size());
 
-    assert(output_tensors_tn_lstm.size() == 7);
+    assert(m_lstm_state.size() == 7);
 
+    // DNN part inference
     auto output_tensors_tn = m_rnnt->get_session_tn_dnn()->Run(Ort::RunOptions{nullptr}, m_rnnt->get_inp_names_tn_dnn().data(),
-                                                               &output_tensors_tn_lstm[4], 1,
+                                                               &m_lstm_state[4], 1,
                                                                m_rnnt->get_out_names_tn_dnn().data(), m_rnnt->get_out_names_tn_dnn().size());
 
     assert(output_tensors_tn.size() == 1);
 
-    auto tn_shape = output_tensors_tn[0].GetTensorTypeAndShapeInfo().GetShape();
+    auto tn_shape = output_tensors_tn.at(0).GetTensorTypeAndShapeInfo().GetShape();
 
     std::vector<Ort::Value> input_tensors_pn;
     spr::inference::vec_hyps process_hyps;
@@ -90,6 +115,9 @@ namespace spr::inference {
     //e.g. 89x [1,1,512]
     int step_t;
     for(step_t = 0; step_t < tn_shape.at(1); ++step_t) {
+
+      obtain_current_result(step_t);
+
       process_hyps = m_beam_hyps;
       m_beam_hyps.clear();
 
@@ -124,9 +152,9 @@ namespace spr::inference {
         // forward CN
         auto output_tensors_cn =
           joint(memory_info,
-                output_tensors_tn[0].GetTensorData<float>() +
+                output_tensors_tn.at(0).GetTensorData<float>() +
                 (step_t * m_rnnt->get_inp_size_cn()),
-                output_tensors_pn[0].GetTensorData<float>());
+                output_tensors_pn.at(0).GetTensorData<float>());
 
         // sum the joint probabilities to 1
         softmax(output_tensors_cn.at(0).GetTensorMutableData<float>(),
@@ -141,7 +169,17 @@ namespace spr::inference {
         float best_logp = ((std::get<1>(top_log_probs.at(0)) != 0) ?
                            std::get<0>(top_log_probs.at(0)) : std::get<0>(top_log_probs.at(1)));
 
+#ifdef DEBUG_DEC
+        size_t xi=0;
+        std::cout << "[";
+#endif
+
         for (const auto & top_log_prob : top_log_probs) {
+#ifdef DEBUG_DEC
+          std::string tmpc;
+          m_rnnt->get_sentencepiece_processor()->Decode(std::vector{static_cast<int>(std::get<1>(top_log_prob))}, &tmpc);
+          std::cout << tmpc << ((++xi < top_log_probs.size()) ? ", " : "]\n");
+#endif
 
           token_t top_hyp = {
             .prediction = a_best_tok.prediction,
@@ -185,11 +223,31 @@ namespace spr::inference {
 
     //    std::cout << "[" << step_t << "] beam_hyps size: " << m_beam_hyps.size() << ", process_hyps size: " << process_hyps.size() << std::endl;
 
-    auto best_token =
+
+    return obtain_current_result(step_t);
+  }
+
+#ifdef DEBUG_DEC
+  std::string beam_search::obtain_current_result(size_t step_t) const {
+#else
+  std::string beam_search::obtain_current_result() const {
+#endif
+
+
+    std::string result;
+     auto best_token =
       *std::max_element(m_beam_hyps.begin(),
                         m_beam_hyps.end(),
                         [](auto &left, auto &right) {
                           return left.logp_score / left.prediction.size() < right.logp_score / right.prediction.size(); });
+#ifdef DEBUG_DEC
+     for(const auto &tok : m_beam_hyps) {
+       std::string tmpr;
+       m_rnnt->get_sentencepiece_processor()->Decode(std::vector(tok.prediction.cbegin() + 1, tok.prediction.cend()), &tmpr);
+       std::cout << "[" << step_t << "]hyp: " << tmpr << std::endl;
+     }
+#endif
+
 
     // un-tokenize (w/o the first zero element)
     auto particies = std::vector(best_token.prediction.cbegin() + 1,

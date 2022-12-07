@@ -4,7 +4,7 @@
 #include <iostream>
 
 //#define LEAP 4096 //~1/25s
-//#define LEAP 8192
+//#define LEAP 8192 //~1/5s
 //#define LEAP 16000 //1s
 #define LEAP 64000
 

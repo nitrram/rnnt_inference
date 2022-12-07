@@ -53,6 +53,12 @@ namespace spr::inference {
 
     std::vector<Ort::Value> joint(const Ort::MemoryInfo&, const float *, const float *);
 
+#ifdef DEBUG_DEC
+		std::string obtain_current_result(size_t step_t) const;
+#else
+		std::string obtain_current_result() const;
+#endif
+
     static vec_top_prob_t find_top_k_probs(const float *inp, size_t size);
 
   private:
@@ -62,8 +68,11 @@ namespace spr::inference {
     std::vector<float> m_pn_state_buffer;
     std::vector<float> m_pre_alloc_sum_gelu;
 
-    //    token_t m_last_best_token;
+		// time 2 time predicted hyps
     spr::inference::vec_hyps m_beam_hyps;
+
+		// last LSTM output
+		std::vector<Ort::Value> m_lstm_state;
 
     static size_t s_beam_size;
     static float s_state_beam;

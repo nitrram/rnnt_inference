@@ -61,7 +61,7 @@ namespace spr::inference {
        const std::string &,
        int64_t);
 
- 
+
     virtual ~rnnt_attrs();
 
     void reset_buffer_win_len(int64_t);
@@ -87,7 +87,7 @@ namespace spr::inference {
     }
 
     inline const dims_size_t &get_inp_dims_tn() const {
-      return m_session_tn.inp_node_dims.at(0); 
+      return m_session_tn.inp_node_dims.at(0);
     }
 
     inline const vec_node_names_t &get_inp_names_tn() const {
@@ -115,7 +115,7 @@ namespace spr::inference {
       return m_session_tn_cnn.out_node_names;
     }
 
-    inline const std::vector<size_t> &get_inp_size_tn_lstm() const {
+    inline const std::vector<size_t> &get_inp_sizes_tn_lstm() const {
       return m_session_tn_lstm.inp_sizes;
     }
 
@@ -134,7 +134,7 @@ namespace spr::inference {
     inline size_t get_inp_size_tn_dnn() const {
       return m_session_tn_dnn.inp_sizes.at(0);
     }
-    
+
     inline const dims_size_t &get_inp_dims_tn_dnn() const {
       return m_session_tn_dnn.inp_node_dims.at(0);
     }
@@ -211,7 +211,7 @@ namespace spr::inference {
 
       std::cout << "[";
       for(i=0; i < session_attr.inp_node_dims.size() - 1; ++i) {
-      
+
         std::cout << "[";
         for(j=0; j<session_attr.inp_node_dims.at(i).size() - 1; ++j) {
           std::cout << session_attr.inp_node_dims.at(i).at(j) << ", ";
@@ -235,7 +235,7 @@ namespace spr::inference {
 
       std::cout << "[";
       for(i=0; i < session_attr.out_node_dims.size() - 1; ++i) {
-      
+
         std::cout << "[";
         for(j=0; j<session_attr.out_node_dims.at(i).size() - 1; ++j) {
           std::cout << session_attr.out_node_dims.at(i).at(j) << ", ";
@@ -273,7 +273,7 @@ namespace spr::inference {
 #ifdef DEBUG_INF
       print("encoder", m_session_tn);
 #endif
-      
+
       print("tn_cnn", m_session_tn_cnn);
       print("tn_lstm", m_session_tn_lstm);
       print("tn_dnn", m_session_tn_dnn);

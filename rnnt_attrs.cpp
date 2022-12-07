@@ -136,7 +136,7 @@ namespace spr::inference {
     delete m_sp_processor;
 
     auto del_nodes = [](auto  &session_attr) {
-      
+
       for(const char *node_name : session_attr.inp_node_names)
         session_attr.allocator.Free(const_cast<void*>(reinterpret_cast<const void*>(node_name)));
       for(const char *node_name : session_attr.out_node_names)
@@ -165,7 +165,7 @@ namespace spr::inference {
 
       // TN_CNN
       fetch_session_input_params(m_session_tn_cnn, variable_input_len);
- 
+
       // TN_LSTM
       fetch_session_input_params(m_session_tn_lstm, variable_input_len);
 
@@ -188,13 +188,13 @@ namespace spr::inference {
   void rnnt_attrs::fetch_session_input_params(s_attr &session_attr, int64_t variable_input_len) {
     auto *session = session_attr.session;
     for(size_t i=0; i< session->GetInputCount(); ++i) {
-      
+
       auto type_info = session->GetInputTypeInfo(i);
       auto tensor_info = type_info.GetTensorTypeAndShapeInfo();
       session_attr.inp_node_dims[i] = tensor_info.GetShape();
-      
+
       session_attr.inp_sizes[i] = 1L;
-      
+
       for(size_t j=0; j < session_attr.inp_node_dims[i].size(); ++j) {
         if(session_attr.inp_node_dims[i][j] < 1) session_attr.inp_node_dims[i][j] = variable_input_len;
         session_attr.inp_sizes[i] *= session_attr.inp_node_dims[i][j];

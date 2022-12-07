@@ -106,7 +106,8 @@ add_compile_options(
 #  -DDEBUG_FEAT
 #  -DDEBUG_WAV
 #  -DDEBUG_BUF
-  -DDEBUG_INF
+#  -DDEBUG_INF
+  -DDEBUG_DEC
   -pthread #protobuf
   -DHAVE_PTHREAD=1 #protobuf
   -mfma #neon
